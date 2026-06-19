@@ -1,0 +1,9 @@
+.dart_tool/
+build/
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+*-firebase-adminsdk-*.json
+google-application-credentials*.json
