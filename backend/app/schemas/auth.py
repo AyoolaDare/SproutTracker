@@ -1,0 +1,37 @@
+from pydantic import BaseModel, EmailStr, Field
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=100)
+    full_name: str = Field(min_length=2, max_length=200)
+    business_name: str = Field(min_length=2, max_length=200)
+    business_type: str = "RETAIL"
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    role: str
+    tenant_id: str
+    business_name: str | None = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
