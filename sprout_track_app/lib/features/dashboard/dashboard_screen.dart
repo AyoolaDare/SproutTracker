@@ -348,10 +348,14 @@ class _HealthCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final avg      = items.isEmpty
-        ? 0
-        : items.map((e) => e.quantity <= e.reorderLevel ? 35 : 90).reduce((a, b) => a + b) ~/ items.length;
-    final lowStock = items.where((e) => e.quantity <= e.reorderLevel).length;
+    final total    = items.length;
+    final healthy  = items.where((e) => e.quantity > e.reorderLevel).length;
+    final lowStock = total - healthy;
+    final progress = total == 0 ? 0.0 : healthy / total;
+    final pct      = (progress * 100).round();
+
+    final arcColor = pct >= 70 ? AppTheme.moss : pct >= 40 ? AppTheme.ochre : AppTheme.terracotta;
+    final status   = pct >= 70 ? 'Good' : pct >= 40 ? 'Fair' : 'Critical';
 
     return SproutCard(
       child: Column(
@@ -364,19 +368,20 @@ class _HealthCard extends StatelessWidget {
               width: 180,
               height: 180,
               child: CustomPaint(
-                painter: _GrowthRingPainter(progress: avg / 100),
+                painter: _HealthArcPainter(progress: progress, color: arcColor),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '$avg%',
+                        '$pct%',
                         style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.w900,
+                              color: arcColor,
                             ),
                       ),
                       Text(
-                        'healthy',
+                        status,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
@@ -390,9 +395,17 @@ class _HealthCard extends StatelessWidget {
           const SizedBox(height: 20),
           Row(
             children: [
-              _HealthChip(icon: Icons.inventory_2_rounded,   label: '${items.length} SKUs tracked'),
+              _HealthChip(
+                icon: Icons.check_circle_outline_rounded,
+                label: '$healthy of $total healthy',
+                color: AppTheme.moss,
+              ),
               const SizedBox(width: 10),
-              _HealthChip(icon: Icons.warning_amber_rounded, label: '$lowStock low stock'),
+              _HealthChip(
+                icon: Icons.warning_amber_rounded,
+                label: '$lowStock low stock',
+                color: lowStock > 0 ? AppTheme.terracotta : AppTheme.moss,
+              ),
             ],
           ),
         ],
@@ -402,31 +415,38 @@ class _HealthCard extends StatelessWidget {
 }
 
 class _HealthChip extends StatelessWidget {
-  const _HealthChip({required this.icon, required this.label});
+  const _HealthChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
   final IconData icon;
   final String   label;
+  final Color    color;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: .55),
+          color: color.withValues(alpha: .08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: .45)),
+          border: Border.all(color: color.withValues(alpha: .22)),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+            Icon(icon, size: 16, color: color),
             const SizedBox(width: 7),
             Expanded(
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
             ),
           ],
@@ -436,44 +456,46 @@ class _HealthChip extends StatelessWidget {
   }
 }
 
-// ── Growth ring custom painter ─────────────────────────────────────────────────
+// ── Health arc custom painter ──────────────────────────────────────────────────
 
-class _GrowthRingPainter extends CustomPainter {
-  _GrowthRingPainter({required this.progress});
+class _HealthArcPainter extends CustomPainter {
+  _HealthArcPainter({required this.progress, required this.color});
   final double progress;
+  final Color  color;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final radius = math.min(size.width, size.height) / 2;
-    final paint  = Paint()
-      ..style     = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 14;
+    final radius = math.min(size.width, size.height) / 2 - 14;
+    const stroke = 20.0;
 
-    const ringColors = [AppTheme.moss, AppTheme.sage, AppTheme.ochre, AppTheme.terracotta];
+    final trackPaint = Paint()
+      ..style      = PaintingStyle.stroke
+      ..strokeCap  = StrokeCap.round
+      ..strokeWidth = stroke
+      ..color      = color.withValues(alpha: .12);
 
-    for (var i = 0; i < 4; i++) {
-      final r = radius - 10 - i * 20;
-      // Track
-      canvas.drawCircle(
-        center,
-        r,
-        paint..color = AppTheme.clay.withValues(alpha: .14 + i * .03),
-      );
-      // Progress arc
+    final arcPaint = Paint()
+      ..style      = PaintingStyle.stroke
+      ..strokeCap  = StrokeCap.round
+      ..strokeWidth = stroke
+      ..color      = color;
+
+    canvas.drawCircle(center, radius, trackPaint);
+    if (progress > 0) {
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: r),
+        Rect.fromCircle(center: center, radius: radius),
         -math.pi / 2,
-        math.pi * 2 * progress * (1 - i * .07),
+        math.pi * 2 * progress,
         false,
-        paint..color = ringColors[i],
+        arcPaint,
       );
     }
   }
 
   @override
-  bool shouldRepaint(covariant _GrowthRingPainter old) => old.progress != progress;
+  bool shouldRepaint(covariant _HealthArcPainter old) =>
+      old.progress != progress || old.color != color;
 }
 
 // ── Recent invoice activity ────────────────────────────────────────────────────

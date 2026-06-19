@@ -79,3 +79,29 @@ sprout-track:dashboard:*
 ```
 
 New migrated users receive random unusable passwords. They should use your future password reset/invite flow before logging into the new backend.
+
+## 6. Activate Migrated Users
+
+After running `alembic upgrade head` with the password activation migration, create setup links:
+
+```bash
+python scripts/create_activation_links.py --frontend-url https://your-vercel-app.vercel.app
+```
+
+For one user:
+
+```bash
+python scripts/create_activation_links.py --frontend-url https://your-vercel-app.vercel.app --email user@example.com
+```
+
+Send each user their link. The frontend should collect the new password and call:
+
+```text
+POST /api/auth/password-reset/confirm
+{
+  "token": "...",
+  "password": "new password"
+}
+```
+
+Do not ask migrated users to sign up again with the same email. They should activate the existing migrated account so their invoices, customers, inventory, and expenses remain attached.

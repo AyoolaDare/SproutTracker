@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
@@ -23,6 +25,9 @@ from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
     RefreshRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    PasswordResetResponse,
     TokenResponse,
     UserResponse,
 )
@@ -33,6 +38,20 @@ settings = get_settings()
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
+PASSWORD_RESET_MINUTES = 60
+
+
+def hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def issue_password_reset_token(user: User) -> str:
+    token = secrets.token_urlsafe(48)
+    user.password_reset_token_hash = hash_reset_token(token)
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=PASSWORD_RESET_MINUTES
+    )
+    return token
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -59,6 +78,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         tenant_id=tenant.id,
         email=req.email,
         password_hash=hash_password(req.password),
+        password_set_at=datetime.now(timezone.utc),
         full_name=req.full_name,
         role=UserRole.OWNER,
     )
@@ -89,6 +109,15 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
             detail="Account locked due to too many failed attempts. Try again later.",
         )
 
+    if user.password_set_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PASSWORD_SETUP_REQUIRED",
+                "message": "This migrated account needs a new Sprout Track password.",
+            },
+        )
+
     # Verify password
     if not verify_password(req.password, user.password_hash):
         user.failed_attempts += 1
@@ -115,6 +144,53 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),
         expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post("/password-reset/request", response_model=PasswordResetResponse)
+async def request_password_reset(
+    req: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == req.email))
+    user = result.scalar_one_or_none()
+    if user:
+        issue_password_reset_token(user)
+        await db.commit()
+
+    # Do not reveal whether an email exists.
+    return PasswordResetResponse(
+        success=True,
+        message="If that email exists, a password setup link can be sent.",
+    )
+
+
+@router.post("/password-reset/confirm", response_model=PasswordResetResponse)
+async def confirm_password_reset(
+    req: PasswordResetConfirm,
+    db: AsyncSession = Depends(get_db),
+):
+    token_hash = hash_reset_token(req.token)
+    result = await db.execute(
+        select(User).where(User.password_reset_token_hash == token_hash)
+    )
+    user = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not user or not user.password_reset_expires_at or user.password_reset_expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired password reset token")
+
+    user.password_hash = hash_password(req.password)
+    user.password_set_at = now
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    user.failed_attempts = 0
+    user.locked_until = None
+    user.is_active = True
+    await db.commit()
+
+    return PasswordResetResponse(
+        success=True,
+        message="Password set successfully. You can now log in.",
     )
 
 

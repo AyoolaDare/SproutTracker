@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,11 +7,24 @@ import '../features/customers/customers_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/expenses/expenses_screen.dart';
 import '../features/inventory/inventory_screen.dart';
-import '../features/invoices/invoices_screen.dart';
 import '../features/invoices/invoice_print_screen.dart';
+import '../features/invoices/invoices_screen.dart';
 import '../features/reports/reports_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/shell/app_shell.dart';
+
+Page<void> _fadePage({required GoRouterState state, required Widget child}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 160),
+    reverseTransitionDuration: const Duration(milliseconds: 120),
+    transitionsBuilder: (context, animation, _, child) => FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      child: child,
+    ),
+  );
+}
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -18,44 +32,71 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const LoginScreen(),
+        ),
       ),
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
           GoRoute(
             path: '/',
-            builder: (context, state) => const DashboardScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const DashboardScreen(),
+            ),
           ),
           GoRoute(
             path: '/invoices',
-            builder: (context, state) => const InvoicesScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const InvoicesScreen(),
+            ),
           ),
           GoRoute(
             path: '/invoices/:id/print',
-            builder: (context, state) => InvoicePrintScreen(
-              invoiceId: state.pathParameters['id']!,
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: InvoicePrintScreen(
+                invoiceId: state.pathParameters['id']!,
+              ),
             ),
           ),
           GoRoute(
             path: '/customers',
-            builder: (context, state) => const CustomersScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const CustomersScreen(),
+            ),
           ),
           GoRoute(
             path: '/inventory',
-            builder: (context, state) => const InventoryScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const InventoryScreen(),
+            ),
           ),
           GoRoute(
             path: '/expenses',
-            builder: (context, state) => const ExpensesScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const ExpensesScreen(),
+            ),
           ),
           GoRoute(
             path: '/reports',
-            builder: (context, state) => const ReportsScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const ReportsScreen(),
+            ),
           ),
           GoRoute(
             path: '/settings',
-            builder: (context, state) => const SettingsScreen(),
+            pageBuilder: (context, state) => _fadePage(
+              state: state,
+              child: const SettingsScreen(),
+            ),
           ),
         ],
       ),
