@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -32,6 +32,7 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.config import get_settings
+from app.services.email import send_password_setup_email
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 settings = get_settings()
@@ -150,13 +151,16 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
 @router.post("/password-reset/request", response_model=PasswordResetResponse)
 async def request_password_reset(
     req: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
     if user:
-        issue_password_reset_token(user)
+        token = issue_password_reset_token(user)
         await db.commit()
+        setup_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+        background_tasks.add_task(send_password_setup_email, user.email, setup_url)
 
     # Do not reveal whether an email exists.
     return PasswordResetResponse(

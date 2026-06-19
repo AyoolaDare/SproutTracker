@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/state/sprout_state.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/sprout_card.dart';
@@ -135,6 +136,46 @@ class SettingsScreen extends ConsumerWidget {
                 color: AppTheme.moss,
                 title: 'Data sync',
                 subtitle: 'Local-first storage. Backend sync connects on deployment.',
+              ),
+
+              const SizedBox(height: 24),
+              Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: .4)),
+              const SizedBox(height: 12),
+
+              // Sign out
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => ref.read(authProvider.notifier).logout(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.terracotta.withValues(alpha: .10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.logout_rounded,
+                          size: 18,
+                          color: AppTheme.terracotta,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Sign out',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                color: AppTheme.terracotta,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),

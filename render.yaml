@@ -9,6 +9,8 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: DEBUG
+        value: "false"
       - key: APP_NAME
         value: Sprout Track
       - key: FRONTEND_URL
@@ -21,6 +23,10 @@ services:
         sync: false
       - key: DATABASE_URL_SYNC
         sync: false
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
       - key: REDIS_URL
         sync: false
       - key: REDIS_REQUIRED
@@ -37,5 +43,17 @@ services:
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         value: sprout-track
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Sprout Track
       - key: SENTRY_DSN
         sync: false

@@ -64,7 +64,10 @@ async def create_draft_invoice(
         vat_item_rate = vat_rate if apply_vat else 0
         if item_data.get("product_id"):
             prod_result = await db.execute(
-                select(Product).where(Product.id == item_data["product_id"])
+                select(Product).where(
+                    Product.id == item_data["product_id"],
+                    Product.tenant_id == tenant_id,
+                )
             )
             product = prod_result.scalar_one_or_none()
             if product and not product.vat_applicable:
@@ -165,7 +168,10 @@ async def finalize_invoice(
 
         # Check if product tracks inventory
         prod_result = await db.execute(
-            select(Product).where(Product.id == item.product_id)
+            select(Product).where(
+                Product.id == item.product_id,
+                Product.tenant_id == tenant_id,
+            )
         )
         product = prod_result.scalar_one_or_none()
         if not product or not product.track_inventory:
@@ -207,7 +213,10 @@ async def finalize_invoice(
 
     # Update customer outstanding balance
     cust_result = await db.execute(
-        select(Customer).where(Customer.id == invoice.customer_id)
+        select(Customer).where(
+            Customer.id == invoice.customer_id,
+            Customer.tenant_id == tenant_id,
+        )
     )
     customer = cust_result.scalar_one_or_none()
     if customer:
@@ -251,7 +260,10 @@ async def record_payment(
 
     # Update customer balances
     cust_result = await db.execute(
-        select(Customer).where(Customer.id == invoice.customer_id)
+        select(Customer).where(
+            Customer.id == invoice.customer_id,
+            Customer.tenant_id == invoice.tenant_id,
+        )
     )
     customer = cust_result.scalar_one_or_none()
     if customer:
@@ -304,7 +316,10 @@ async def void_invoice(
 
         # Reverse customer balances
         cust_result = await db.execute(
-            select(Customer).where(Customer.id == invoice.customer_id)
+            select(Customer).where(
+                Customer.id == invoice.customer_id,
+                Customer.tenant_id == tenant_id,
+            )
         )
         customer = cust_result.scalar_one_or_none()
         if customer:

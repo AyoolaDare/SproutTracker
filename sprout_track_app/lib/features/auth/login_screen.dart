@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/api/api_client.dart';
+import '../../core/auth/auth_provider.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final isWide = width >= 860;
-
-    if (isWide) {
-      return const Scaffold(body: _WideLayout());
-    }
+    final isWide = MediaQuery.sizeOf(context).width >= 860;
+    if (isWide) return const Scaffold(body: _WideLayout());
     return const Scaffold(body: _NarrowLayout());
   }
 }
@@ -27,7 +25,7 @@ class _WideLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Left brand panel ─────────────────────────────────────────────────────
+        // Left brand panel
         Expanded(
           flex: 5,
           child: Container(
@@ -43,7 +41,6 @@ class _WideLayout extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Brand mark
                 Container(
                   width: 52,
                   height: 52,
@@ -70,8 +67,6 @@ class _WideLayout extends StatelessWidget {
                       ),
                 ),
                 const Spacer(),
-
-                // Feature bullets ──────────────────────────────────────────────
                 ..._features.map(
                   (f) => Padding(
                     padding: const EdgeInsets.only(bottom: 16),
@@ -112,7 +107,6 @@ class _WideLayout extends StatelessWidget {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 32),
                 Text(
                   '© ${DateTime.now().year} Sprout Track · Built for Nigerian SMEs',
@@ -125,7 +119,7 @@ class _WideLayout extends StatelessWidget {
           ),
         ),
 
-        // Right form panel ─────────────────────────────────────────────────────
+        // Right form panel
         Expanded(
           flex: 6,
           child: ColoredBox(
@@ -145,46 +139,319 @@ class _NarrowLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: AppTheme.canvas,
-      child: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [AppTheme.moss, Color(0xFF3D4A22)],
-                    ),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Icon(Icons.eco_rounded, color: AppTheme.sand, size: 28),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Sprout Track',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Ledger in motion',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 32),
-                const _LoginForm(),
-              ],
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        // Dark brand header — same gradient as the desktop left panel
+        Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF23271A), Color(0xFF3D4A22), Color(0xFF606C38)],
+              stops: [0.0, 0.55, 1.0],
             ),
+          ),
+          padding: const EdgeInsets.fromLTRB(28, 44, 28, 36),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: AppTheme.sand.withValues(alpha: .15),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.sand.withValues(alpha: .25)),
+                ),
+                child: const Icon(Icons.eco_rounded, color: AppTheme.sand, size: 24),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Sprout Track',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: AppTheme.sand,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Ledger in motion',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.sand.withValues(alpha: .65),
+                    ),
+              ),
+            ],
+          ),
+        ),
+
+        // White form section — proper contrast for input fields
+        Expanded(
+          child: ColoredBox(
+            color: scheme.surface,
+            child: SingleChildScrollView(
+              child: const _LoginForm(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Login form ─────────────────────────────────────────────────────────────────
+
+class _LoginForm extends ConsumerStatefulWidget {
+  const _LoginForm();
+
+  @override
+  ConsumerState<_LoginForm> createState() => _LoginFormState();
+}
+
+class _LoginFormState extends ConsumerState<_LoginForm> {
+  final _formKey       = GlobalKey<FormState>();
+  final _email         = TextEditingController();
+  final _password      = TextEditingController();
+  final _emailFocus    = FocusNode();
+  final _passwordFocus = FocusNode();
+  bool  _obscure       = true;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    ref.read(authProvider.notifier).login(_email.text.trim(), _password.text);
+  }
+
+  Future<void> _requestPasswordReset() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your email address first.')),
+      );
+      _emailFocus.requestFocus();
+      return;
+    }
+
+    try {
+      await ref.read(apiClientProvider).post(
+        '/api/auth/password-reset/request',
+        data: {'email': email},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('If the email exists, a password setup link has been sent.'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not request password setup. Try again shortly.'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme    = Theme.of(context).colorScheme;
+    final auth      = ref.watch(authProvider);
+    final isLoading = auth.isLoading;
+    final error     = auth.error;
+
+    final isNarrow = MediaQuery.sizeOf(context).width < 860;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: isNarrow ? 24 : 36,
+          vertical: 36,
+        ),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Welcome back',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Sign in to manage invoices, inventory, and finances.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 28),
+
+              // Email field
+              TextFormField(
+                controller: _email,
+                focusNode: _emailFocus,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autocorrect: false,
+                enabled: !isLoading,
+                onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+                decoration: const InputDecoration(
+                  labelText: 'Email address',
+                  prefixIcon: Icon(Icons.mail_outline_rounded),
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Email is required.';
+                  if (!v.contains('@') || !v.contains('.')) {
+                    return 'Enter a valid email address.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+
+              // Password field
+              TextFormField(
+                controller: _password,
+                focusNode: _passwordFocus,
+                obscureText: _obscure,
+                textInputAction: TextInputAction.done,
+                enabled: !isLoading,
+                onFieldSubmitted: (_) => _submit(),
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscure
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 20,
+                    ),
+                    onPressed: isLoading
+                        ? null
+                        : () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Password is required.';
+                  if (v.length < 6) return 'Password must be at least 6 characters.';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+
+              // Forgot password
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: isLoading ? null : _requestPasswordReset,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Forgot password?',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: AppTheme.moss,
+                        ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Error banner
+              if (error != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.terracotta.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.terracotta.withValues(alpha: .25),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        size: 16,
+                        color: AppTheme.terracotta,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          error,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppTheme.terracotta,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Sign in button
+              FilledButton(
+                onPressed: isLoading ? null : _submit,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Sign in'),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Demo divider
+              Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      'Demo access',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Demo login
+              OutlinedButton.icon(
+                onPressed: isLoading
+                    ? null
+                    : () => ref.read(authProvider.notifier).loginDemo(),
+                icon: const Icon(Icons.bolt_rounded, size: 18),
+                label: const Text('Continue with demo data'),
+              ),
+            ],
           ),
         ),
       ),
@@ -192,145 +459,7 @@ class _NarrowLayout extends StatelessWidget {
   }
 }
 
-// ── Shared login form ──────────────────────────────────────────────────────────
-
-class _LoginForm extends StatefulWidget {
-  const _LoginForm();
-
-  @override
-  State<_LoginForm> createState() => _LoginFormState();
-}
-
-class _LoginFormState extends State<_LoginForm> {
-  final _email    = TextEditingController();
-  final _password = TextEditingController();
-  bool _obscure   = true;
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 420),
-      child: Padding(
-        padding: const EdgeInsets.all(36),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Welcome back',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Sign in to manage invoices, inventory, and finances.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 28),
-
-            // Email
-            TextField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Email address',
-                prefixIcon: Icon(Icons.mail_outline_rounded),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Password
-            TextField(
-              controller: _password,
-              obscureText: _obscure,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                prefixIcon: const Icon(Icons.lock_outline_rounded),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    size: 20,
-                  ),
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // Forgot password
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  'Forgot password?',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: AppTheme.moss,
-                      ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Sign in button
-            FilledButton(
-              onPressed: () => context.go('/'),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 2),
-                child: Text('Sign in'),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Divider with "or" label
-            Row(
-              children: [
-                const Expanded(child: Divider()),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    'Demo access',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                  ),
-                ),
-                const Expanded(child: Divider()),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Demo login shortcut
-            OutlinedButton.icon(
-              onPressed: () => context.go('/'),
-              icon: const Icon(Icons.bolt_rounded, size: 18),
-              label: const Text('Continue with demo data'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Feature list data ──────────────────────────────────────────────────────────
+// ── Feature list ───────────────────────────────────────────────────────────────
 
 class _Feature {
   const _Feature(this.icon, this.title, this.subtitle);
@@ -340,8 +469,24 @@ class _Feature {
 }
 
 const _features = [
-  _Feature(Icons.receipt_long_rounded,          'Smart invoicing',      'Create, track, and collect payments with VAT support.'),
-  _Feature(Icons.inventory_2_rounded,           'Inventory control',    'Real-time stock levels, reorder alerts, and history.'),
-  _Feature(Icons.account_balance_wallet_rounded,'Expense tracking',     'Categorise spend and keep deductibles visible.'),
-  _Feature(Icons.query_stats_rounded,           'Financial reports',    'P&L statements, cash flow, and margin analysis.'),
+  _Feature(
+    Icons.receipt_long_rounded,
+    'Smart invoicing',
+    'Create, track, and collect payments with VAT support.',
+  ),
+  _Feature(
+    Icons.inventory_2_rounded,
+    'Inventory control',
+    'Real-time stock levels, reorder alerts, and history.',
+  ),
+  _Feature(
+    Icons.account_balance_wallet_rounded,
+    'Expense tracking',
+    'Categorise spend and keep deductibles visible.',
+  ),
+  _Feature(
+    Icons.query_stats_rounded,
+    'Financial reports',
+    'P&L statements, cash flow, and margin analysis.',
+  ),
 ];

@@ -77,7 +77,10 @@ async def allocate_fifo(
     if total_available < quantity_needed:
         # Get product name for error message
         prod_result = await db.execute(
-            select(Product.name).where(Product.id == product_id)
+            select(Product.name).where(
+                Product.id == product_id,
+                Product.tenant_id == tenant_id,
+            )
         )
         product_name = prod_result.scalar_one_or_none() or "Unknown"
         raise InsufficientStockError(product_name, total_available, quantity_needed)

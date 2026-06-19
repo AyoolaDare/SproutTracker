@@ -32,6 +32,12 @@
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_STORAGE_BUCKET`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `SMTP_FROM_NAME`
 
 `DATABASE_URL` can be `postgresql://...`; the application normalizes it to `postgresql+asyncpg://...`.
 
@@ -62,6 +68,31 @@ alembic upgrade head
 - Dashboard cache is invalidated after invoice, inventory, product, customer, expense, and settings writes.
 - `/api/auth/revoke` stores the current access-token `jti` in Redis until token expiry.
 - CORS and trusted hosts must be set to real deployed domains before production traffic.
+
+## Frontend/Auth Wiring
+
+Flutter/Vercel must be built with:
+
+```text
+API_BASE_URL=https://your-render-api.onrender.com
+```
+
+Render must allow the Vercel origin:
+
+```text
+FRONTEND_URL=https://your-vercel-app.vercel.app
+CORS_ORIGINS=https://your-vercel-app.vercel.app
+TRUSTED_HOSTS=your-render-api.onrender.com
+```
+
+Migrated users do not keep Firebase passwords. They activate their existing migrated account through:
+
+```text
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/confirm
+```
+
+The Flutter login screen can request a setup email, and `/reset-password?token=...` sets the new password.
 
 ## Recommended Add-ons
 

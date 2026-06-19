@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://sprout:sprout@localhost:5432/sprout"
     DATABASE_URL_SYNC: str = "postgresql://sprout:sprout@localhost:5432/sprout"
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
 
     # Redis / Upstash
     REDIS_URL: str = "redis://localhost:6379"
@@ -49,6 +51,8 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Sprout Track"
 
     # Observability
     SENTRY_DSN: str = ""
@@ -119,8 +123,24 @@ class Settings(BaseSettings):
             raise ValueError("JWT_REFRESH_SECRET must be set to a strong production secret.")
         if "localhost" in self.DATABASE_URL:
             raise ValueError("DATABASE_URL must point to Supabase/Postgres in production.")
+        if "REPLACE_" in self.DATABASE_URL or "REPLACE_" in self.DATABASE_URL_SYNC:
+            raise ValueError("DATABASE_URL values still contain placeholders.")
+        if "REPLACE_" in self.FRONTEND_URL or "your-" in self.FRONTEND_URL:
+            raise ValueError("FRONTEND_URL must be set to the deployed frontend URL.")
+        if "localhost" in self.FRONTEND_URL or "127.0.0.1" in self.FRONTEND_URL:
+            raise ValueError("FRONTEND_URL cannot be localhost in production.")
+        if "*" in self.cors_origins_list:
+            raise ValueError("CORS_ORIGINS cannot include '*' when credentials are enabled.")
+        if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins_list):
+            raise ValueError("CORS_ORIGINS cannot include localhost in production.")
+        if any("REPLACE_" in host or "your-" in host for host in self.trusted_hosts_list):
+            raise ValueError("TRUSTED_HOSTS contains placeholder values.")
+        if set(self.trusted_hosts_list).issubset({"localhost", "127.0.0.1"}):
+            raise ValueError("TRUSTED_HOSTS must include deployed backend hostnames in production.")
         if self.REDIS_REQUIRED and not self.REDIS_URL:
             raise ValueError("REDIS_URL is required when REDIS_REQUIRED=true.")
+        if self.REDIS_REQUIRED and "REPLACE_" in self.REDIS_URL:
+            raise ValueError("REDIS_URL still contains placeholders.")
         return self
 
 

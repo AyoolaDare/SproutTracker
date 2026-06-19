@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.invoice import Invoice, InvoiceItem, InvoiceStatus, Payment
 from app.models.customer import Customer
+from app.models.product import Product
 from app.models.tax import TaxSettings
 from app.middleware.auth import get_current_user
 from app.schemas.invoice import (
@@ -26,6 +27,40 @@ from app.services.audit import log_action
 from app.services.cache import invalidate_tenant_dashboard
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
+
+
+async def ensure_customer_belongs_to_tenant(
+    db: AsyncSession,
+    customer_id: str,
+    tenant_id: str,
+) -> None:
+    result = await db.execute(
+        select(Customer.id).where(
+            Customer.id == customer_id,
+            Customer.tenant_id == tenant_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+
+async def ensure_products_belong_to_tenant(
+    db: AsyncSession,
+    product_ids: set[str],
+    tenant_id: str,
+) -> None:
+    if not product_ids:
+        return
+    result = await db.execute(
+        select(Product.id).where(
+            Product.id.in_(product_ids),
+            Product.tenant_id == tenant_id,
+        )
+    )
+    found = set(result.scalars().all())
+    missing = product_ids - found
+    if missing:
+        raise HTTPException(status_code=404, detail="One or more products were not found")
 
 
 def invoice_to_response(invoice: Invoice) -> InvoiceResponse:
@@ -139,13 +174,12 @@ async def create_invoice(
     db: AsyncSession = Depends(get_db),
 ):
     # Verify customer
-    cust_result = await db.execute(
-        select(Customer).where(
-            Customer.id == req.customer_id, Customer.tenant_id == user.tenant_id
-        )
+    await ensure_customer_belongs_to_tenant(db, req.customer_id, user.tenant_id)
+    await ensure_products_belong_to_tenant(
+        db,
+        {item.product_id for item in req.items if item.product_id},
+        user.tenant_id,
     )
-    if not cust_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Customer not found")
 
     # Get tax settings
     tax_result = await db.execute(
@@ -206,6 +240,15 @@ async def update_invoice(
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status != InvoiceStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Only draft invoices can be edited")
+
+    if req.customer_id is not None:
+        await ensure_customer_belongs_to_tenant(db, req.customer_id, user.tenant_id)
+    if req.items is not None:
+        await ensure_products_belong_to_tenant(
+            db,
+            {item.product_id for item in req.items if item.product_id},
+            user.tenant_id,
+        )
 
     # For simplicity, delete and recreate if items changed
     if req.items is not None:

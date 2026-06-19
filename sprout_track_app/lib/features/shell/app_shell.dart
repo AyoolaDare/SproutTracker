@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/state/sprout_state.dart';
 
 class AppShell extends ConsumerWidget {
@@ -23,15 +24,17 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Read unconditionally so Riverpod tracks it on every layout path
-    final profile     = ref.watch(sproutStoreProvider).businessProfile;
-    final isMobile    = ResponsiveBreakpoints.of(context).isMobile;
-    final location    = GoRouterState.of(context).uri.path;
+    // Auth state — read unconditionally for Riverpod tracking
+    final auth      = ref.watch(authProvider);
+    final profile   = ref.watch(sproutStoreProvider).businessProfile;
+    final isMobile  = ResponsiveBreakpoints.of(context).isMobile;
+    final location  = GoRouterState.of(context).uri.path;
     final activeIndex = _resolveIndex(location);
 
     final mobileDestinations = destinations.take(5).toList();
-    final mobileIndex        = activeIndex >= mobileDestinations.length ? 0 : activeIndex;
+    final mobileIndex = activeIndex >= mobileDestinations.length ? 0 : activeIndex;
 
+    // ── Mobile layout ────────────────────────────────────────────────────────
     if (isMobile) {
       return Scaffold(
         appBar: AppBar(
@@ -48,7 +51,14 @@ class AppShell extends ConsumerWidget {
             const SizedBox(width: 8),
           ],
         ),
-        body: child,
+        body: auth.isLoading
+            ? const Center(child: CircularProgressIndicator.adaptive())
+            : Column(
+                children: [
+                  if (auth.isDemo) const _DemoBanner(),
+                  Expanded(child: child),
+                ],
+              ),
         bottomNavigationBar: NavigationBar(
           height: 72,
           selectedIndex: mobileIndex,
@@ -61,6 +71,7 @@ class AppShell extends ConsumerWidget {
       );
     }
 
+    // ── Desktop layout ───────────────────────────────────────────────────────
     return Scaffold(
       body: Row(
         children: [
@@ -72,7 +83,16 @@ class AppShell extends ConsumerWidget {
           Expanded(
             child: ColoredBox(
               color: Theme.of(context).scaffoldBackgroundColor,
-              child: SafeArea(child: child),
+              child: SafeArea(
+                child: auth.isLoading
+                    ? const Center(child: CircularProgressIndicator.adaptive())
+                    : Column(
+                        children: [
+                          if (auth.isDemo) const _DemoBanner(),
+                          Expanded(child: child),
+                        ],
+                      ),
+              ),
             ),
           ),
         ],
@@ -88,9 +108,52 @@ class AppShell extends ConsumerWidget {
   }
 }
 
+// ── Demo mode banner ───────────────────────────────────────────────────────────
+
+class _DemoBanner extends ConsumerWidget {
+  const _DemoBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+      color: AppTheme.ochre.withValues(alpha: .10),
+      child: Row(
+        children: [
+          const Icon(Icons.bolt_rounded, size: 14, color: AppTheme.ochre),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Demo mode — data resets on page refresh.',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppTheme.ochre,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => ref.read(authProvider.notifier).logout(),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.moss,
+              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Sign in with real account',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Desktop sidebar ────────────────────────────────────────────────────────────
 
-class _DesktopSidebar extends StatelessWidget {
+class _DesktopSidebar extends ConsumerWidget {
   const _DesktopSidebar({
     required this.destinations,
     required this.activeIndex,
@@ -102,8 +165,8 @@ class _DesktopSidebar extends StatelessWidget {
   final BusinessProfile        profile;
 
   @override
-  Widget build(BuildContext context) {
-    final scheme  = Theme.of(context).colorScheme;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme   = Theme.of(context).colorScheme;
     final initials = profile.businessName.isNotEmpty
         ? profile.businessName.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
         : 'ST';
@@ -123,7 +186,7 @@ class _DesktopSidebar extends StatelessWidget {
           const _BrandLockup(),
           const SizedBox(height: 24),
 
-          // ── Nav items ───────────────────────────────────────────────────────
+          // Nav items
           for (var i = 0; i < destinations.length; i++)
             _SidebarItem(
               destination: destinations[i],
@@ -133,24 +196,23 @@ class _DesktopSidebar extends StatelessWidget {
 
           const Spacer(),
 
-          // ── Business profile footer ─────────────────────────────────────────
+          // Business profile footer with logout
           const Divider(height: 20),
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () => context.go('/settings'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest.withValues(alpha: .45),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: scheme.outlineVariant.withValues(alpha: .45),
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: .45),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: .45),
               ),
-              child: Row(
-                children: [
-                  // Avatar circle with initials
-                  Container(
+            ),
+            child: Row(
+              children: [
+                // Avatar
+                GestureDetector(
+                  onTap: () => context.go('/settings'),
+                  child: Container(
                     width: 36,
                     height: 36,
                     decoration: const BoxDecoration(
@@ -167,8 +229,13 @@ class _DesktopSidebar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
+                ),
+                const SizedBox(width: 10),
+
+                // Business name
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => context.go('/settings'),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -188,9 +255,18 @@ class _DesktopSidebar extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Icon(Icons.tune_rounded, size: 16, color: scheme.onSurfaceVariant),
-                ],
-              ),
+                ),
+
+                // Sign-out icon
+                IconButton(
+                  tooltip: 'Sign out',
+                  icon: const Icon(Icons.logout_rounded, size: 16),
+                  color: scheme.onSurfaceVariant,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: () => ref.read(authProvider.notifier).logout(),
+                ),
+              ],
             ),
           ),
         ],
@@ -277,7 +353,7 @@ class _BrandLockup extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: compact ? 36 : 42,
+          width:  compact ? 36 : 42,
           height: compact ? 36 : 42,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
