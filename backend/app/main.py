@@ -4,8 +4,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from app.config import get_settings
 from app.core.redis import close_redis, connect_redis, get_redis
+from app.database import engine
 from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.api import auth, customers, products, inventory, invoices, expenses, reports, dashboard
 from app.api import settings as settings_api
@@ -74,9 +76,26 @@ async def health():
 @app.get("/api/ready")
 async def ready():
     redis = get_redis()
+    database_ok = False
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        database_ok = True
+    except Exception:
+        database_ok = False
+
+    redis_ok = redis is not None
+    if redis is not None:
+        try:
+            redis_ok = bool(await redis.ping())
+        except Exception:
+            redis_ok = False
+
+    dependencies_ok = database_ok and (redis_ok or not app_settings.REDIS_REQUIRED)
     return {
-        "status": "ready" if (redis is not None or not app_settings.REDIS_REQUIRED) else "degraded",
-        "redis": redis is not None,
+        "status": "ready" if dependencies_ok else "degraded",
+        "database": database_ok,
+        "redis": redis_ok,
         "environment": app_settings.ENVIRONMENT,
     }
 

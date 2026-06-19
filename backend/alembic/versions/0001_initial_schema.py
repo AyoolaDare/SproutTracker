@@ -260,6 +260,7 @@ def upgrade() -> None:
         *timestamps(),
     )
     op.create_index("ix_payments_invoice_id", "payments", ["invoice_id"])
+    op.create_index("uq_payments_invoice_reference", "payments", ["invoice_id", "reference_number"], unique=True)
 
     op.create_table(
         "expenses",

@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
@@ -20,22 +21,27 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(sproutStoreProvider);
-    final breakpoints = ResponsiveBreakpoints.of(context);
-    final isMobile = breakpoints.isMobile;
-    final metricColumns = isMobile ? 1 : (breakpoints.isTablet ? 2 : 4);
-    final paidInvoices = data.invoices.where((invoice) => invoice.derivedStatus == InvoiceStatus.paid);
-    final totalRevenue = paidInvoices.fold<num>(0, (sum, invoice) => sum + (invoice.amountPaid == 0 ? invoice.amount : invoice.amountPaid));
-    final totalExpenses = data.expenses.fold<num>(0, (sum, expense) => sum + expense.amount);
-    final netProfit = totalRevenue - totalExpenses;
-    final stockValue = data.inventory.fold<num>(0, (sum, item) => sum + item.stockValue);
-    final outstanding = data.invoices.fold<num>(0, (sum, invoice) => sum + invoice.amountDue);
+    final data       = ref.watch(sproutStoreProvider);
+    final bp         = ResponsiveBreakpoints.of(context);
+    final isMobile   = bp.isMobile;
+    final metricCols = isMobile ? 2 : (bp.isTablet ? 2 : 4);
+
+    final paidInvoices  = data.invoices.where((i) => i.derivedStatus == InvoiceStatus.paid);
+    final totalRevenue  = paidInvoices.fold<num>(0, (s, i) => s + (i.amountPaid == 0 ? i.amount : i.amountPaid));
+    final totalExpenses = data.expenses.fold<num>(0, (s, e) => s + e.amount);
+    final netProfit     = totalRevenue - totalExpenses;
+    final stockValue    = data.inventory.fold<num>(0, (s, i) => s + i.stockValue);
+    final outstanding   = data.invoices.fold<num>(0, (s, i) => s + i.amountDue);
+
+    final profitMargin = totalRevenue == 0 ? 0.0 : (netProfit / totalRevenue) * 100;
+
     final metrics = [
-      MetricViewData('Revenue', totalRevenue, 18.4, MetricKind.money),
-      MetricViewData('Expenses', totalExpenses, -6.2, MetricKind.money),
-      MetricViewData('Net Profit', netProfit, totalRevenue == 0 ? 0 : (netProfit / totalRevenue) * 100, MetricKind.money),
-      MetricViewData('Stock Value', stockValue, outstanding == 0 ? 0 : outstanding / 10000, MetricKind.money),
+      _MetricData('Revenue',    totalRevenue,  18.4,  _MetricKind.cashIn),
+      _MetricData('Expenses',   totalExpenses, -6.2,  _MetricKind.cashOut),
+      _MetricData('Net profit', netProfit,     profitMargin, _MetricKind.neutral),
+      _MetricData('Stock value', stockValue, outstanding == 0 ? 0.0 : -(outstanding / stockValue * 100).clamp(0.0, 100.0).toDouble(), _MetricKind.neutral),
     ];
+
     final cashFlow = _monthlyCashFlow(data);
 
     return SproutPage(
@@ -43,143 +49,162 @@ class DashboardScreen extends ConsumerWidget {
       subtitle: 'Cash, stock, debtors, and profit signals in one operating view.',
       action: FilledButton.icon(
         onPressed: () => context.go('/invoices'),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Create invoice'),
+        icon: const Icon(Icons.add_rounded, size: 18),
+        label: const Text('New invoice'),
       ),
       children: [
+        // ── KPI tiles ──────────────────────────────────────────────────────────
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: metrics.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: metricColumns,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
-            mainAxisExtent: isMobile ? 118 : 132,
+            crossAxisCount: metricCols,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            mainAxisExtent: isMobile ? 110 : 124,
           ),
-          itemBuilder: (context, index) => _MetricTile(metrics[index]),
+          itemBuilder: (context, i) => _MetricTile(metrics[i]),
         ),
         const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final twoColumn = constraints.maxWidth > 900;
-            final cashFlowCard = _CashFlowCard(points: cashFlow);
-            final health = _HealthCard(items: data.inventory);
-            if (!twoColumn) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  cashFlowCard,
-                  const SizedBox(height: 18),
-                  health,
-                ],
-              );
-            }
-            return Flex(
-              direction: Axis.horizontal,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 7,
-                  child: cashFlowCard,
-                ),
-                const SizedBox(width: 18),
-                Expanded(
-                  flex: 5,
-                  child: health,
-                ),
-              ],
-            );
-          },
+
+        // ── Cash flow + inventory health ────────────────────────────────────
+        _TwoColumnLayout(
+          threshold: 860,
+          leftFlex: 7,
+          rightFlex: 5,
+          left: _CashFlowCard(points: cashFlow),
+          right: _HealthCard(items: data.inventory),
         ),
         const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final twoColumn = constraints.maxWidth > 900;
-            final invoices = _InvoiceActivity(invoices: data.invoices.take(5).toList());
-            final expenses = _ExpenseActivity(expenses: data.expenses.take(5).toList());
-            if (!twoColumn) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  invoices,
-                  const SizedBox(height: 18),
-                  expenses,
-                ],
-              );
-            }
-            return Flex(
-              direction: Axis.horizontal,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: invoices,
-                ),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: expenses,
-                ),
-              ],
-            );
-          },
+
+        // ── Recent activity ─────────────────────────────────────────────────
+        _TwoColumnLayout(
+          threshold: 860,
+          left: _InvoiceActivity(invoices: data.invoices.take(5).toList()),
+          right: _ExpenseActivity(expenses: data.expenses.take(5).toList()),
         ),
       ],
     );
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  const _MetricTile(this.metric);
+// ── Two-column adaptive layout ─────────────────────────────────────────────────
 
-  final MetricViewData metric;
+class _TwoColumnLayout extends StatelessWidget {
+  const _TwoColumnLayout({
+    required this.left,
+    required this.right,
+    this.threshold = 860,
+    this.leftFlex  = 1,
+    this.rightFlex = 1,
+  });
+  final Widget left;
+  final Widget right;
+  final double threshold;
+  final int    leftFlex;
+  final int    rightFlex;
 
   @override
   Widget build(BuildContext context) {
-    final positive = metric.delta >= 0;
-    final value = metric.kind == MetricKind.money
-        ? compactMoney(metric.value)
-        : '${metric.value.toStringAsFixed(0)}%';
+    return LayoutBuilder(
+      builder: (context, box) {
+        if (box.maxWidth <= threshold) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [left, const SizedBox(height: 14), right],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: leftFlex, child: left),
+            const SizedBox(width: 14),
+            Expanded(flex: rightFlex, child: right),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ── Metric tile ────────────────────────────────────────────────────────────────
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile(this.metric);
+  final _MetricData metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final positive     = metric.delta >= 0;
+    final scheme       = Theme.of(context).colorScheme;
+    final valueText    = compactMoney(metric.value);
+    final deltaColor   = positive ? AppTheme.moss : AppTheme.terracotta;
+    final accentColor  = switch (metric.kind) {
+      _MetricKind.cashIn  => AppTheme.moss,
+      _MetricKind.cashOut => AppTheme.terracotta,
+      _MetricKind.neutral => AppTheme.ochre,
+    };
 
     return SproutCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: EdgeInsets.zero,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  metric.label,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-              Icon(
-                positive
-                    ? Icons.trending_up_rounded
-                    : Icons.trending_down_rounded,
-                color: positive ? AppTheme.moss : AppTheme.terracotta,
-              ),
-            ],
-          ),
-          const Spacer(),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 22,
-                  ),
+          // Left accent bar
+          Container(
+            width: 4,
+            decoration: BoxDecoration(
+              color: accentColor,
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '${positive ? '+' : ''}${metric.delta.toStringAsFixed(1)}% this month',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: positive ? AppTheme.moss : AppTheme.terracotta,
-                  fontWeight: FontWeight.w700,
-                ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          metric.label,
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ),
+                      Icon(
+                        positive ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                        size: 18,
+                        color: deltaColor,
+                      ),
+                    ],
+                  ),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      valueText,
+                      maxLines: 1,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 20,
+                            color: scheme.onSurface,
+                          ),
+                    ),
+                  ),
+                  Text(
+                    '${positive ? '+' : ''}${metric.delta.toStringAsFixed(1)}%  this month',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: deltaColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -187,67 +212,121 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
+// ── Cash flow chart card ───────────────────────────────────────────────────────
+
 class _CashFlowCard extends StatelessWidget {
   const _CashFlowCard({required this.points});
-
-  final List<CashFlowViewPoint> points;
+  final List<_CashFlowPoint> points;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final axisStyle = GoogleFonts.epilogue(
+      fontSize: 11,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurfaceVariant,
+    );
+
     return SproutCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: 'Cash flow rhythm'),
-          const SizedBox(height: 8),
-          Text(
-            'Income is staying ahead of operating spend across the last six months.',
-            style: Theme.of(context).textTheme.bodyMedium,
+          SectionHeader(
+            title: 'Cash flow',
+            trailing: Row(
+              children: [
+                _LegendDot(color: AppTheme.moss,       label: 'Income'),
+                const SizedBox(width: 14),
+                _LegendDot(color: AppTheme.terracotta, label: 'Expenses'),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
+          Text(
+            'Monthly income vs. operating spend — last 6 months (₦ millions)',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 20),
           SizedBox(
-            height: 250,
+            height: 240,
             child: BarChart(
               BarChartData(
                 borderData: FlBorderData(show: false),
-                gridData: const FlGridData(show: false),
+                gridData: FlGridData(
+                  drawVerticalLine: false,
+                  horizontalInterval: 0.5,
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: scheme.outlineVariant.withValues(alpha: .4),
+                    strokeWidth: 1,
+                    dashArray: [4, 4],
+                  ),
+                ),
                 titlesData: FlTitlesData(
-                  leftTitles: const AxisTitles(),
-                  topTitles: const AxisTitles(),
+                  topTitles:   const AxisTitles(),
                   rightTitles: const AxisTitles(),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 44,
+                      interval: 0.5,
+                      getTitlesWidget: (v, _) => Text(
+                        v == 0 ? '0' : '${v.toStringAsFixed(1)}M',
+                        style: axisStyle,
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                  ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index < 0 || index >= points.length) {
-                          return const SizedBox.shrink();
-                        }
+                      getTitlesWidget: (v, _) {
+                        final i = v.toInt();
+                        if (i < 0 || i >= points.length) return const SizedBox.shrink();
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
-                          child: Text(points[index].month),
+                          child: Text(points[i].month, style: axisStyle),
                         );
                       },
                     ),
+                  ),
+                ),
+                barTouchData: BarTouchData(
+                  touchTooltipData: BarTouchTooltipData(
+                    tooltipRoundedRadius: 10,
+                    tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    getTooltipItem: (group, _, rod, rodIndex) {
+                      final lbl = rodIndex == 0 ? 'Income' : 'Expenses';
+                      final val = rod.toY;
+                      return BarTooltipItem(
+                        '$lbl\n₦${(val * 1000000).toStringAsFixed(0)}',
+                        GoogleFonts.epilogue(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
                   ),
                 ),
                 barGroups: [
                   for (var i = 0; i < points.length; i++)
                     BarChartGroupData(
                       x: i,
-                      barsSpace: 6,
+                      barsSpace: 5,
                       barRods: [
                         BarChartRodData(
                           toY: points[i].income,
-                          width: 14,
+                          width: 13,
                           color: AppTheme.moss,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                         ),
                         BarChartRodData(
                           toY: points[i].expenses,
-                          width: 14,
+                          width: 13,
                           color: AppTheme.terracotta,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                         ),
                       ],
                     ),
@@ -261,16 +340,17 @@ class _CashFlowCard extends StatelessWidget {
   }
 }
 
+// ── Inventory health card ──────────────────────────────────────────────────────
+
 class _HealthCard extends StatelessWidget {
   const _HealthCard({required this.items});
-
   final List<InventoryItem> items;
 
   @override
   Widget build(BuildContext context) {
-    final average = items.isEmpty
+    final avg      = items.isEmpty
         ? 0
-        : items.map((e) => e.quantity <= e.reorderLevel ? 35 : 90).reduce((a, b) => a + b) / items.length;
+        : items.map((e) => e.quantity <= e.reorderLevel ? 35 : 90).reduce((a, b) => a + b) ~/ items.length;
     final lowStock = items.where((e) => e.quantity <= e.reorderLevel).length;
 
     return SproutCard(
@@ -281,23 +361,25 @@ class _HealthCard extends StatelessWidget {
           const SizedBox(height: 20),
           Center(
             child: SizedBox(
-              width: 190,
-              height: 190,
+              width: 180,
+              height: 180,
               child: CustomPaint(
-                painter: GrowthRingPainter(progress: average / 100),
+                painter: _GrowthRingPainter(progress: avg / 100),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${average.round()}%',
-                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        '$avg%',
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                             ),
                       ),
                       Text(
-                        'stock healthy',
-                        style: Theme.of(context).textTheme.labelLarge,
+                        'healthy',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
                       ),
                     ],
                   ),
@@ -305,18 +387,12 @@ class _HealthCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 20),
           Row(
             children: [
-              _HealthChip(
-                icon: Icons.inventory_2_rounded,
-                label: '${items.length} SKUs tracked',
-              ),
+              _HealthChip(icon: Icons.inventory_2_rounded,   label: '${items.length} SKUs tracked'),
               const SizedBox(width: 10),
-              _HealthChip(
-                icon: Icons.warning_amber_rounded,
-                label: '$lowStock low stock',
-              ),
+              _HealthChip(icon: Icons.warning_amber_rounded, label: '$lowStock low stock'),
             ],
           ),
         ],
@@ -327,23 +403,24 @@ class _HealthCard extends StatelessWidget {
 
 class _HealthChip extends StatelessWidget {
   const _HealthChip({required this.icon, required this.label});
-
   final IconData icon;
-  final String label;
+  final String   label;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
-          color: AppTheme.sage.withValues(alpha: .18),
-          borderRadius: BorderRadius.circular(16),
+          color: scheme.surfaceContainerHighest.withValues(alpha: .55),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outlineVariant.withValues(alpha: .45)),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18),
-            const SizedBox(width: 8),
+            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 7),
             Expanded(
               child: Text(
                 label,
@@ -359,168 +436,333 @@ class _HealthChip extends StatelessWidget {
   }
 }
 
-class GrowthRingPainter extends CustomPainter {
-  GrowthRingPainter({required this.progress});
+// ── Growth ring custom painter ─────────────────────────────────────────────────
 
+class _GrowthRingPainter extends CustomPainter {
+  _GrowthRingPainter({required this.progress});
   final double progress;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final radius = math.min(size.width, size.height) / 2;
-    final basePaint = Paint()
-      ..style = PaintingStyle.stroke
+    final paint  = Paint()
+      ..style     = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 16;
+      ..strokeWidth = 14;
+
+    const ringColors = [AppTheme.moss, AppTheme.sage, AppTheme.ochre, AppTheme.terracotta];
 
     for (var i = 0; i < 4; i++) {
-      final ringRadius = radius - 12 - i * 22;
+      final r = radius - 10 - i * 20;
+      // Track
       canvas.drawCircle(
         center,
-        ringRadius,
-        basePaint..color = AppTheme.clay.withValues(alpha: .16 + i * .03),
+        r,
+        paint..color = AppTheme.clay.withValues(alpha: .14 + i * .03),
       );
+      // Progress arc
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: ringRadius),
+        Rect.fromCircle(center: center, radius: r),
         -math.pi / 2,
-        math.pi * 2 * progress * (1 - i * .08),
+        math.pi * 2 * progress * (1 - i * .07),
         false,
-        basePaint
-          ..color = [
-            AppTheme.moss,
-            AppTheme.sage,
-            AppTheme.ochre,
-            AppTheme.terracotta,
-          ][i],
+        paint..color = ringColors[i],
       );
     }
   }
 
   @override
-  bool shouldRepaint(covariant GrowthRingPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _GrowthRingPainter old) => old.progress != progress;
 }
+
+// ── Recent invoice activity ────────────────────────────────────────────────────
 
 class _InvoiceActivity extends StatelessWidget {
   const _InvoiceActivity({required this.invoices});
-
   final List<Invoice> invoices;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return SproutCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: 'Recent invoices'),
-          const SizedBox(height: 14),
-          for (final invoice in invoices) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(invoice.customerName),
-              subtitle: Text(invoice.invoiceNumber),
-              trailing: SizedBox(
-                width: 112,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        compactMoney(invoice.amount),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
+          SectionHeader(
+            title: 'Recent invoices',
+            trailing: TextButton(
+              onPressed: () => context.go('/invoices'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'View all',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: AppTheme.moss,
                     ),
-                    const SizedBox(height: 4),
-                    StatusPill(invoice.derivedStatus.label),
-                  ],
-                ),
               ),
             ),
-            if (invoice != invoices.last) const Divider(height: 1),
-          ],
+          ),
+          const SizedBox(height: 12),
+          if (invoices.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No invoices yet',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            )
+          else
+            for (var idx = 0; idx < invoices.length; idx++) ...[
+              if (idx > 0)
+                Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: .45)),
+              _InvoiceRow(invoices[idx]),
+            ],
         ],
       ),
     );
   }
 }
 
+class _InvoiceRow extends StatelessWidget {
+  const _InvoiceRow(this.invoice);
+  final Invoice invoice;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withValues(alpha: .6),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.receipt_long_rounded, size: 18, color: scheme.onPrimaryContainer),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  invoice.customerName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  invoice.invoiceNumber,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                compactMoney(invoice.amount),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              StatusPill(invoice.derivedStatus.label),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Recent expense activity ────────────────────────────────────────────────────
+
 class _ExpenseActivity extends StatelessWidget {
   const _ExpenseActivity({required this.expenses});
-
   final List<Expense> expenses;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return SproutCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: 'Expense watchlist'),
-          const SizedBox(height: 14),
-          for (final expense in expenses) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: CircleAvatar(
-                backgroundColor: AppTheme.terracotta.withValues(alpha: .14),
-                child: const Icon(Icons.account_balance_wallet_rounded),
+          SectionHeader(
+            title: 'Expense watchlist',
+            trailing: TextButton(
+              onPressed: () => context.go('/expenses'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              title: Text(expense.description),
-              subtitle: Text(expense.category),
-              trailing: SizedBox(
-                width: 92,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    compactMoney(expense.amount),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
+              child: Text(
+                'View all',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: AppTheme.moss,
+                    ),
               ),
             ),
-            if (expense != expenses.last) const Divider(height: 1),
-          ],
+          ),
+          const SizedBox(height: 12),
+          if (expenses.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No expenses recorded',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            )
+          else
+            for (var idx = 0; idx < expenses.length; idx++) ...[
+              if (idx > 0)
+                Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: .45)),
+              _ExpenseRow(expenses[idx]),
+            ],
         ],
       ),
     );
   }
 }
 
-enum MetricKind { money, percent }
+class _ExpenseRow extends StatelessWidget {
+  const _ExpenseRow(this.expense);
+  final Expense expense;
 
-class MetricViewData {
-  const MetricViewData(this.label, this.value, this.delta, this.kind);
-  final String label;
-  final num value;
-  final double delta;
-  final MetricKind kind;
-}
-
-class CashFlowViewPoint {
-  const CashFlowViewPoint(this.month, this.income, this.expenses);
-  final String month;
-  final double income;
-  final double expenses;
-}
-
-List<CashFlowViewPoint> _monthlyCashFlow(SproutState state) {
-  final now = DateTime.now();
-  final result = <CashFlowViewPoint>[];
-  for (var i = 5; i >= 0; i--) {
-    final month = DateTime(now.year, now.month - i);
-    final monthName = DateFormat('MMM').format(month);
-    bool sameMonth(DateTime value) => value.year == month.year && value.month == month.month;
-    final income = state.invoices
-        .where((invoice) => invoice.derivedStatus == InvoiceStatus.paid && sameMonth(invoice.issueDate))
-        .fold<num>(0, (sum, invoice) => sum + (invoice.amountPaid == 0 ? invoice.amount : invoice.amountPaid));
-    final expenses = state.expenses
-        .where((expense) => sameMonth(expense.date))
-        .fold<num>(0, (sum, expense) => sum + expense.amount);
-    result.add(CashFlowViewPoint(monthName, income / 1000000, expenses / 1000000));
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTheme.terracotta.withValues(alpha: .1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.account_balance_wallet_rounded, size: 18, color: AppTheme.terracotta),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  expense.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  expense.category,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            compactMoney(expense.amount),
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: AppTheme.terracotta,
+                ),
+          ),
+        ],
+      ),
+    );
   }
-  return result;
 }
+
+// ── Shared legend dot ──────────────────────────────────────────────────────────
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+  final Color  color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: Theme.of(context).textTheme.labelMedium),
+      ],
+    );
+  }
+}
+
+// ── Data models ────────────────────────────────────────────────────────────────
+
+enum _MetricKind { cashIn, cashOut, neutral }
+
+class _MetricData {
+  const _MetricData(this.label, this.value, this.delta, this.kind);
+  final String      label;
+  final num         value;
+  final double      delta;
+  final _MetricKind kind;
+}
+
+class _CashFlowPoint {
+  const _CashFlowPoint(this.month, this.income, this.expenses);
+  final String month;
+  final double income;    // in millions
+  final double expenses;  // in millions
+}
+
+List<_CashFlowPoint> _monthlyCashFlow(SproutState state) {
+  final now = DateTime.now();
+  return [
+    for (var i = 5; i >= 0; i--)
+      () {
+        final m = DateTime(now.year, now.month - i);
+        bool same(DateTime d) => d.year == m.year && d.month == m.month;
+        final inc = state.invoices
+            .where((inv) => inv.derivedStatus == InvoiceStatus.paid && same(inv.issueDate))
+            .fold<num>(0, (s, inv) => s + (inv.amountPaid == 0 ? inv.amount : inv.amountPaid));
+        final exp = state.expenses
+            .where((e) => same(e.date))
+            .fold<num>(0, (s, e) => s + e.amount);
+        return _CashFlowPoint(DateFormat('MMM').format(m), inc / 1000000, exp / 1000000);
+      }(),
+  ];
+}
+
