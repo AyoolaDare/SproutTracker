@@ -1,0 +1,18 @@
+{
+  "name": "Sprout Track",
+  "short_name": "Sprout Track",
+  "description": "Accounting, inventory, invoices, and reporting for growing businesses.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#E8DCC7",
+  "theme_color": "#606C38",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icons/sprout-track.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
