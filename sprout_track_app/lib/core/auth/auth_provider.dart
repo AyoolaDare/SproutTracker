@@ -10,6 +10,27 @@ import 'token_store.dart';
 
 const googleClientId = String.fromEnvironment('GOOGLE_CLIENT_ID');
 
+String _dioMessage(DioException error, String fallback) {
+  final data = error.response?.data;
+  if (data is Map<String, dynamic>) {
+    final detail = data['detail'];
+    if (detail is String && detail.trim().isNotEmpty) return detail;
+    if (detail is Map<String, dynamic>) {
+      final message = detail['message'];
+      if (message is String && message.trim().isNotEmpty) return message;
+    }
+    final message = data['message'];
+    if (message is String && message.trim().isNotEmpty) return message;
+  }
+  if (error.response?.statusCode != null) {
+    return '$fallback (${error.response!.statusCode})';
+  }
+  if (error.message != null && error.message!.trim().isNotEmpty) {
+    return '$fallback ${error.message}';
+  }
+  return fallback;
+}
+
 // ── Auth status ────────────────────────────────────────────────────────────────
 
 enum AuthStatus { loading, authenticated, unauthenticated }
@@ -213,20 +234,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       if (mounted) state = const AuthState(status: AuthStatus.authenticated);
     } on DioException catch (e) {
-      final detail = e.response?.data is Map<String, dynamic>
-          ? (e.response?.data as Map<String, dynamic>)['detail']
-          : null;
       if (mounted) {
         state = AuthState(
           status: AuthStatus.unauthenticated,
-          error: detail is String ? detail : 'Google sign-in failed. Please try again.',
+          error: _dioMessage(e, 'Google sign-in failed.'),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        state = const AuthState(
+        state = AuthState(
           status: AuthStatus.unauthenticated,
-          error: 'Google sign-in failed. Please try again.',
+          error: e is StateError ? e.message : 'Google sign-in failed: $e',
         );
       }
     }

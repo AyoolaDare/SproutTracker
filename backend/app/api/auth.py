@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -43,6 +44,7 @@ from app.services.email import (
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
@@ -248,6 +250,12 @@ async def google_auth(req: GoogleAuthRequest, db: AsyncSession = Depends(get_db)
         )
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid Google token")
+    except Exception:
+        logger.exception("Google token verification failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Could not verify Google token. Please try again.",
+        )
 
     if not payload.get("email_verified"):
         raise HTTPException(status_code=403, detail="Google email is not verified")
@@ -256,37 +264,50 @@ async def google_auth(req: GoogleAuthRequest, db: AsyncSession = Depends(get_db)
     subject = str(payload["sub"])
     full_name = payload.get("name") or email.split("@")[0]
 
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    if not user:
-        tenant = Tenant(
-            business_name=req.business_name or f"{full_name}'s Business",
-            business_type=req.business_type,
-        )
-        db.add(tenant)
-        await db.flush()
-        db.add(TaxSettings(tenant_id=tenant.id))
-        user = User(
-            tenant_id=tenant.id,
-            email=email,
-            password_hash=hash_password(secrets.token_urlsafe(32)),
-            password_set_at=None,
-            email_verified_at=datetime.now(timezone.utc),
-            full_name=full_name,
-            role=UserRole.OWNER,
-            is_active=True,
-            oauth_provider="google",
-            oauth_subject=subject,
-        )
-        db.add(user)
-    else:
-        user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
-        user.is_active = True
-        user.oauth_provider = user.oauth_provider or "google"
-        user.oauth_subject = user.oauth_subject or subject
+    try:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        if not user:
+            tenant = Tenant(
+                business_name=req.business_name or f"{full_name}'s Business",
+                business_type=req.business_type,
+            )
+            db.add(tenant)
+            await db.flush()
+            db.add(TaxSettings(tenant_id=tenant.id))
+            user = User(
+                tenant_id=tenant.id,
+                email=email,
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                password_set_at=None,
+                email_verified_at=datetime.now(timezone.utc),
+                full_name=full_name,
+                role=UserRole.OWNER,
+                is_active=True,
+                oauth_provider="google",
+                oauth_subject=subject,
+            )
+            db.add(user)
+        else:
+            user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
+            user.is_active = True
+            user.oauth_provider = user.oauth_provider or "google"
+            user.oauth_subject = user.oauth_subject or subject
+            user.failed_attempts = 0
+            user.locked_until = None
+            user.last_login_at = datetime.now(timezone.utc)
 
-    await db.commit()
-    await db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
+    except HTTPException:
+        raise
+    except Exception:
+        await db.rollback()
+        logger.exception("Google sign-in failed after token verification email=%s", email)
+        raise HTTPException(
+            status_code=500,
+            detail="Google sign-in could not finish. Please try again.",
+        )
     return token_response_for(user)
 
 
