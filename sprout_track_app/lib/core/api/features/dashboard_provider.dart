@@ -43,24 +43,28 @@ class DashboardMetrics {
       : ((expensesThisMonth - expensesLastMonth) / expensesLastMonth) * 100;
 
   factory DashboardMetrics.fromApi(Map<String, dynamic> json) {
-    final cashFlow = (json['monthly_cash_flow'] as List? ?? [])
+    final data = (json['data'] is Map<String, dynamic>)
+        ? json['data'] as Map<String, dynamic>
+        : json;
+    final cashFlow = ((data['monthly_cash_flow'] ?? data['cash_flow']) as List? ?? [])
         .map((e) => MonthlyCashFlowPoint.fromJson(e as Map<String, dynamic>))
         .toList();
-    final invoices = (json['recent_invoices'] as List? ?? [])
+    final invoices = (data['recent_invoices'] as List? ?? [])
         .map((e) => RecentInvoice.fromJson(e as Map<String, dynamic>))
         .toList();
-    final expenses = (json['recent_expenses'] as List? ?? [])
+    final expenses = (data['recent_expenses'] as List? ?? [])
         .map((e) => RecentExpense.fromJson(e as Map<String, dynamic>))
         .toList();
+    final lowStockAlerts = (data['low_stock_alerts'] as List? ?? []);
     return DashboardMetrics(
-      revenueThisMonth:  _d(json['revenue_this_month']),
-      expensesThisMonth: _d(json['expenses_this_month']),
-      netProfit:         _d(json['net_profit']),
-      outstandingBalance: _d(json['outstanding_balance']),
-      stockValue:        _d(json['stock_value']),
-      lowStockCount:     (json['low_stock_count'] as num? ?? 0).toInt(),
-      revenueLastMonth:  _d(json['revenue_last_month']),
-      expensesLastMonth: _d(json['expenses_last_month']),
+      revenueThisMonth:  _d(data['revenue_this_month']),
+      expensesThisMonth: _d(data['expenses_this_month']),
+      netProfit:         _d(data['net_profit']),
+      outstandingBalance: _d(data['outstanding_balance'] ?? data['outstanding_invoices']),
+      stockValue:        _d(data['stock_value'] ?? data['inventory_value']),
+      lowStockCount:     (data['low_stock_count'] as num? ?? lowStockAlerts.length).toInt(),
+      revenueLastMonth:  _d(data['revenue_last_month']),
+      expensesLastMonth: _d(data['expenses_last_month']),
       monthlyCashFlow:   cashFlow,
       recentInvoices:    invoices,
       recentExpenses:    expenses,
@@ -159,8 +163,8 @@ class MonthlyCashFlowPoint {
   factory MonthlyCashFlowPoint.fromJson(Map<String, dynamic> j) =>
       MonthlyCashFlowPoint(
         month:    j['month'] as String? ?? '',
-        income:   (j['income'] as num? ?? 0).toDouble(),
-        expenses: (j['expenses'] as num? ?? 0).toDouble(),
+        income:   ((j['income'] ?? j['inflow']) as num? ?? 0).toDouble(),
+        expenses: ((j['expenses'] ?? j['outflow']) as num? ?? 0).toDouble(),
       );
 }
 

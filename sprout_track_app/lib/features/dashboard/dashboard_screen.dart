@@ -45,7 +45,8 @@ class DashboardScreen extends ConsumerWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 40),
               child: Text(
-                'Could not load dashboard. Pull to refresh.',
+                'Could not load dashboard: $e',
+                textAlign: TextAlign.center,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
@@ -782,5 +783,4 @@ class _CashFlowPoint {
   final double income;    // in millions
   final double expenses;  // in millions
 }
-
 
