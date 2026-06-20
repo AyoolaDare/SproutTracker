@@ -231,6 +231,33 @@ async def get_metrics(
             "outflow": float(outflow_r.scalar() or 0),
         })
 
+    # --- Expenses last month ---
+    exp_lm_result = await db.execute(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(
+            Expense.tenant_id == tid,
+            Expense.date >= last_month_start,
+            Expense.date <= last_month_end,
+        )
+    )
+    expenses_last_month = float(exp_lm_result.scalar() or 0)
+
+    # --- Recent expenses ---
+    recent_exp_result = await db.execute(
+        select(Expense)
+        .where(Expense.tenant_id == tid)
+        .order_by(Expense.date.desc())
+        .limit(5)
+    )
+    recent_expenses = [
+        {
+            "id": e.id,
+            "description": e.description,
+            "amount": float(e.amount),
+            "category": e.category or "Other",
+        }
+        for e in recent_exp_result.scalars().all()
+    ]
+
     # --- Recent invoices ---
     recent_result = await db.execute(
         select(Invoice)
@@ -277,12 +304,18 @@ async def get_metrics(
         "success": True,
         "data": {
             "revenue_this_month": round(revenue_this_month, 2),
+            "revenue_last_month": round(revenue_last_month, 2),
             "revenue_change_percent": revenue_change,
+            "expenses_this_month": round(expenses_this_month, 2),
+            "expenses_last_month": round(expenses_last_month, 2),
             "net_profit": round(net_profit, 2),
             "net_profit_margin": net_margin,
             "outstanding_invoices": round(outstanding_amount, 2),
+            "outstanding_balance": round(outstanding_amount, 2),
             "outstanding_count": outstanding_count,
             "inventory_value": round(inventory_value, 2),
+            "stock_value": round(inventory_value, 2),
+            "low_stock_count": len(low_stock_alerts),
             "vat_collected_this_month": round(vat_this_month, 2),
             "net_vat_payable": round(net_vat_payable, 2),
             "estimated_cit_quarterly": round(cit_estimate, 2),
@@ -290,7 +323,9 @@ async def get_metrics(
             "expense_breakdown": expense_breakdown,
             "top_selling_products": top_products,
             "cash_flow": cash_flow,
+            "monthly_cash_flow": cash_flow,
             "recent_invoices": recent_invoices,
+            "recent_expenses": recent_expenses,
             "low_stock_alerts": low_stock_alerts,
         },
     }

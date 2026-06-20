@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -127,19 +128,23 @@ async def create_product(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    sku = req.sku or f"{req.name[:3].upper().replace(' ', '')}-{uuid.uuid4().hex[:6].upper()}"
+
     # Check SKU uniqueness within tenant
     existing = await db.execute(
         select(Product).where(
-            Product.tenant_id == user.tenant_id, Product.sku == req.sku
+            Product.tenant_id == user.tenant_id, Product.sku == sku
         )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="SKU already exists")
 
-    product = Product(tenant_id=user.tenant_id, **req.model_dump())
+    data = req.model_dump()
+    data['sku'] = sku
+    product = Product(tenant_id=user.tenant_id, **data)
     db.add(product)
     await log_action(db, user.tenant_id, user.id, "CREATE", "Product", product.id,
-                     new_values=req.model_dump())
+                     new_values=data)
     await db.commit()
     await invalidate_tenant_dashboard(user.tenant_id)
 

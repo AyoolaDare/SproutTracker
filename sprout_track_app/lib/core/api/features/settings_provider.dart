@@ -32,6 +32,7 @@ class ApiBusinessProfile {
   final String? accountNumber;
 
   factory ApiBusinessProfile.fromApi(Map<String, dynamic> j) {
+    // Backend returns flat bank fields; support legacy bank_accounts list too
     final bank = j['bank_accounts'] is List
         ? (j['bank_accounts'] as List).firstOrNull as Map<String, dynamic>?
         : null;
@@ -44,9 +45,9 @@ class ApiBusinessProfile {
       tin:           j['tin'] as String?,
       rcNumber:      j['rc_number'] as String?,
       currency:      j['currency'] as String? ?? 'NGN',
-      bankName:      bank?['bank_name'] as String?,
-      accountName:   bank?['account_name'] as String?,
-      accountNumber: bank?['account_number'] as String?,
+      bankName:      bank?['bank_name'] as String? ?? j['bank_name'] as String?,
+      accountName:   bank?['account_name'] as String? ?? j['bank_account_name'] as String?,
+      accountNumber: bank?['account_number'] as String? ?? j['bank_account_number'] as String?,
     );
   }
 
@@ -69,6 +70,9 @@ class ApiBusinessProfile {
         if (tin != null)           'tin': tin,
         if (rcNumber != null)      'rc_number': rcNumber,
         'currency': currency,
+        if (bankName != null)      'bank_name': bankName,
+        if (accountName != null)   'bank_account_name': accountName,
+        if (accountNumber != null) 'bank_account_number': accountNumber,
       };
 }
 
@@ -116,7 +120,8 @@ class SettingsNotifier extends AutoDisposeAsyncNotifier<ApiBusinessProfile> {
       );
     }
     final res = await ref.watch(apiClientProvider).get('/api/settings/business-profile');
-    return ApiBusinessProfile.fromApi(res.data as Map<String, dynamic>);
+    final raw = res.data as Map<String, dynamic>;
+    return ApiBusinessProfile.fromApi(raw['data'] as Map<String, dynamic>? ?? raw);
   }
 
   Future<void> save(ApiBusinessProfile profile) async {
@@ -138,5 +143,6 @@ final taxSettingsProvider = FutureProvider.autoDispose<ApiTaxSettings>((ref) asy
   final isDemo = ref.watch(authProvider).isDemo;
   if (isDemo) return const ApiTaxSettings();
   final res = await ref.watch(apiClientProvider).get('/api/settings/tax');
-  return ApiTaxSettings.fromApi(res.data as Map<String, dynamic>);
+  final raw = res.data as Map<String, dynamic>;
+  return ApiTaxSettings.fromApi(raw['data'] as Map<String, dynamic>? ?? raw);
 });

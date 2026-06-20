@@ -4,7 +4,7 @@ from datetime import datetime
 
 class ProductCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
-    sku: str = Field(min_length=1, max_length=50)
+    sku: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = None
     category: str | None = None
     selling_price: float = Field(gt=0)

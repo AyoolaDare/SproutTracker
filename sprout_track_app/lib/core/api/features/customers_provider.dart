@@ -74,7 +74,7 @@ class CustomersNotifier extends AutoDisposeAsyncNotifier<List<ApiCustomer>> {
     }
     final res = await ref.watch(apiClientProvider).get(
       '/api/customers',
-      query: {'limit': 200},
+      query: {'limit': 100},
     );
     final body = res.data as Map<String, dynamic>;
     final items = (body['data'] ?? body['items'] ?? body['customers'] ?? []) as List;

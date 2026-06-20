@@ -32,7 +32,7 @@ class ApiExpense {
         description:     j['description'] as String? ?? '',
         amount:          (j['amount'] as num? ?? 0).toDouble(),
         category:        j['category'] as String? ?? 'General',
-        date:            DateTime.tryParse(j['expense_date'] as String? ?? '') ?? DateTime.now(),
+        date:            DateTime.tryParse(j['date'] as String? ?? j['expense_date'] as String? ?? '') ?? DateTime.now(),
         vendor:          j['vendor'] as String?,
         receiptUrl:      j['receipt_url'] as String?,
         isTaxDeductible: j['is_tax_deductible'] as bool? ?? false,
@@ -65,7 +65,7 @@ class ExpensesNotifier extends AutoDisposeAsyncNotifier<List<ApiExpense>> {
     }
     final res = await ref.watch(apiClientProvider).get(
       '/api/expenses',
-      query: {'limit': 200},
+      query: {'limit': 100},
     );
     final body = res.data as Map<String, dynamic>;
     final items = (body['data'] ?? body['items'] ?? body['expenses'] ?? []) as List;
@@ -93,7 +93,7 @@ class ExpensesNotifier extends AutoDisposeAsyncNotifier<List<ApiExpense>> {
         'description':       description,
         'amount':            amount,
         'category':          category,
-        'expense_date':      (date ?? DateTime.now()).toIso8601String().split('T').first,
+        'date':              (date ?? DateTime.now()).toIso8601String().split('T').first,
         if (vendor != null) 'vendor': vendor,
         'is_tax_deductible': isTaxDeductible,
       },
