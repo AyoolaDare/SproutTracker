@@ -10,6 +10,7 @@ from app.core.redis import close_redis, connect_redis, get_redis
 from app.database import engine
 from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.api import auth, customers, products, inventory, invoices, expenses, reports, dashboard
+from app.api import diagnostics
 from app.api import settings as settings_api
 
 app_settings = get_settings()
@@ -122,3 +123,4 @@ app.include_router(expenses.router)
 app.include_router(reports.router)
 app.include_router(dashboard.router)
 app.include_router(settings_api.router)
+app.include_router(diagnostics.router)

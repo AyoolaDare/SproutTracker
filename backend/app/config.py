@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Observability
     SENTRY_DSN: str = ""
 
+    # Temporary production diagnostics. Leave blank unless actively testing.
+    DIAGNOSTIC_TOKEN: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @property
