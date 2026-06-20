@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/auth/auth_provider.dart';
+import 'widgets/google_auth_button.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -395,16 +396,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                 ),
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: isLoading
-                    ? null
-                    : () => ref.read(authProvider.notifier).loginWithGoogle(),
-                icon: const Text(
-                  'G',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-                label: const Text('Continue with Google'),
-              ),
+              const GoogleAuthButton(label: 'Continue with Google'),
               const SizedBox(height: 20),
 
               // Demo divider

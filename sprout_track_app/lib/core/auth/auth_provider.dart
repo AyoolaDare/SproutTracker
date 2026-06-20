@@ -250,6 +250,50 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  Future<void> loginWithGoogleIdToken(
+    String idToken, {
+    String? businessName,
+    String businessType = 'RETAIL',
+  }) async {
+    state = const AuthState(status: AuthStatus.loading);
+    try {
+      final res = await _apiClient.post(
+        '/api/auth/google',
+        data: {
+          'id_token': idToken,
+          'business_name': businessName,
+          'business_type': businessType,
+        },
+      );
+      final data = res.data as Map<String, dynamic>;
+      await _tokenStore.saveTokens(
+        accessToken: data['access_token'] as String,
+        refreshToken: data['refresh_token'] as String? ?? '',
+      );
+      if (mounted) state = const AuthState(status: AuthStatus.authenticated);
+    } on DioException catch (e) {
+      if (mounted) {
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          error: _dioMessage(e, 'Google sign-in failed.'),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          error: 'Google sign-in failed: $e',
+        );
+      }
+    }
+  }
+
+  void setGoogleSignInError(String message) {
+    if (mounted) {
+      state = AuthState(status: AuthStatus.unauthenticated, error: message);
+    }
+  }
+
   Future<void> loginDemo() async {
     // Store the demo marker so it persists across page refreshes
     await _tokenStore.saveTokens(accessToken: 'demo', refreshToken: '');
