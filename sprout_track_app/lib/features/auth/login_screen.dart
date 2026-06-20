@@ -394,6 +394,17 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                       : const Text('Sign in'),
                 ),
               ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: isLoading
+                    ? null
+                    : () => ref.read(authProvider.notifier).loginWithGoogle(),
+                icon: const Text(
+                  'G',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+                label: const Text('Continue with Google'),
+              ),
               const SizedBox(height: 20),
 
               // Demo divider

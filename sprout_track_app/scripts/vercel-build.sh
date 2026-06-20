@@ -17,4 +17,5 @@ fi
 flutter build web \
   --release \
   --pwa-strategy=offline-first \
-  --dart-define=API_BASE_URL="$API_BASE_URL"
+  --dart-define=API_BASE_URL="$API_BASE_URL" \
+  --dart-define=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"

@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../api/api_client.dart';
 import 'token_store.dart';
+
+const googleClientId = String.fromEnvironment('GOOGLE_CLIENT_ID');
 
 // ── Auth status ────────────────────────────────────────────────────────────────
 
@@ -161,6 +164,73 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   // ── Demo login ─────────────────────────────────────────────────────────────
+
+  Future<void> loginWithGoogle({
+    String? businessName,
+    String businessType = 'RETAIL',
+  }) async {
+    if (googleClientId.isEmpty) {
+      if (mounted) {
+        state = const AuthState(
+          status: AuthStatus.unauthenticated,
+          error: 'Google sign-in is not configured yet.',
+        );
+      }
+      return;
+    }
+
+    state = const AuthState(status: AuthStatus.loading);
+    try {
+      final google = GoogleSignIn(
+        clientId: kIsWeb ? googleClientId : null,
+        serverClientId: googleClientId,
+        scopes: const ['email', 'profile'],
+      );
+      final account = await google.signIn();
+      if (account == null) {
+        if (mounted) state = const AuthState(status: AuthStatus.unauthenticated);
+        return;
+      }
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw StateError('Google did not return an ID token.');
+      }
+
+      final res = await _apiClient.post(
+        '/api/auth/google',
+        data: {
+          'id_token': idToken,
+          'business_name': businessName,
+          'business_type': businessType,
+        },
+      );
+      final data = res.data as Map<String, dynamic>;
+      await _tokenStore.saveTokens(
+        accessToken: data['access_token'] as String,
+        refreshToken: data['refresh_token'] as String? ?? '',
+      );
+      if (mounted) state = const AuthState(status: AuthStatus.authenticated);
+    } on DioException catch (e) {
+      final detail = e.response?.data is Map<String, dynamic>
+          ? (e.response?.data as Map<String, dynamic>)['detail']
+          : null;
+      if (mounted) {
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          error: detail is String ? detail : 'Google sign-in failed. Please try again.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        state = const AuthState(
+          status: AuthStatus.unauthenticated,
+          error: 'Google sign-in failed. Please try again.',
+        );
+      }
+    }
+  }
 
   Future<void> loginDemo() async {
     // Store the demo marker so it persists across page refreshes

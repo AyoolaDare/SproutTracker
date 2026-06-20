@@ -101,14 +101,18 @@ async def ready():
         app_settings.SMTP_PASSWORD,
         app_settings.SMTP_FROM_EMAIL,
     ])
+    brevo_api_configured = bool(app_settings.BREVO_API_KEY and app_settings.SMTP_FROM_EMAIL)
+    email_configured = smtp_configured or brevo_api_configured
     if app_settings.is_production:
-        dependencies_ok = dependencies_ok and smtp_configured
+        dependencies_ok = dependencies_ok and email_configured
     return {
         "status": "ready" if dependencies_ok else "degraded",
         "database": database_ok,
         "database_error": database_error,
         "redis": redis_ok,
         "smtp_configured": smtp_configured,
+        "brevo_api_configured": brevo_api_configured,
+        "email_configured": email_configured,
         "environment": app_settings.ENVIRONMENT,
     }
 

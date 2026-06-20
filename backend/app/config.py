@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
     SMTP_FROM_NAME: str = "Sprout Track"
+    BREVO_API_KEY: str = ""
 
     # Social sign-in
     GOOGLE_CLIENT_ID: str = ""
@@ -160,18 +161,19 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_URL is required when REDIS_REQUIRED=true.")
         if self.REDIS_REQUIRED and "REPLACE_" in self.REDIS_URL:
             raise ValueError("REDIS_URL still contains placeholders.")
-        missing_smtp = [
-            key
-            for key, value in {
-                "SMTP_HOST": self.SMTP_HOST,
-                "SMTP_USER": self.SMTP_USER,
-                "SMTP_PASSWORD": self.SMTP_PASSWORD,
-                "SMTP_FROM_EMAIL": self.SMTP_FROM_EMAIL,
-            }.items()
-            if not value or "REPLACE_" in value or "yourdomain.com" in value
-        ]
-        if missing_smtp:
-            raise ValueError(f"Production email is not configured: {', '.join(missing_smtp)}.")
+        smtp_configured = all(
+            [
+                self.SMTP_HOST,
+                self.SMTP_USER,
+                self.SMTP_PASSWORD,
+                self.SMTP_FROM_EMAIL,
+            ]
+        )
+        brevo_configured = bool(self.BREVO_API_KEY and self.SMTP_FROM_EMAIL)
+        if not smtp_configured and not brevo_configured:
+            raise ValueError("Production email is not configured. Set BREVO_API_KEY and SMTP_FROM_EMAIL.")
+        if self.SMTP_FROM_EMAIL and ("REPLACE_" in self.SMTP_FROM_EMAIL or "yourdomain.com" in self.SMTP_FROM_EMAIL):
+            raise ValueError("SMTP_FROM_EMAIL must be a verified production sender.")
         return self
 
 

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/api_client.dart';
+import '../../core/auth/auth_provider.dart';
 
 const _businessTypes = [
   ('RETAIL', 'Retail / Shop'),
@@ -463,6 +464,22 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
                   : const Text('Create account'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _loading
+                  ? null
+                  : () => ref.read(authProvider.notifier).loginWithGoogle(
+                        businessName: _businessName.text.trim().isEmpty
+                            ? null
+                            : _businessName.text.trim(),
+                        businessType: _businessType,
+                      ),
+              icon: const Text(
+                'G',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+              ),
+              label: const Text('Sign up with Google'),
             ),
             const SizedBox(height: 16),
             Row(

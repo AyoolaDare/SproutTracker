@@ -1,7 +1,10 @@
+import base64
 import logging
 import smtplib
 import ssl
 from email.message import EmailMessage
+
+import httpx
 
 from app.config import get_settings
 
@@ -16,14 +19,19 @@ def send_email(
     html: str | None = None,
     attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> None:
-    if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        message = f"SMTP is not configured; skipped email to {to_email}"
+    if not settings.SMTP_FROM_EMAIL:
+        message = f"SMTP_FROM_EMAIL is not configured; skipped email to {to_email}"
         logger.error(message)
         if settings.is_production:
             raise RuntimeError(message)
         return
-    if not settings.SMTP_FROM_EMAIL:
-        message = f"SMTP_FROM_EMAIL is not configured; skipped email to {to_email}"
+
+    if settings.BREVO_API_KEY:
+        _send_email_via_brevo_api(to_email, subject, text, html, attachments)
+        return
+
+    if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
+        message = f"Email is not configured; skipped email to {to_email}"
         logger.error(message)
         if settings.is_production:
             raise RuntimeError(message)
@@ -55,6 +63,63 @@ def send_email(
         logger.info("Sent email subject=%r to=%s from=%s", subject, to_email, settings.SMTP_FROM_EMAIL)
     except Exception:
         logger.exception("Failed sending email subject=%r to=%s from=%s", subject, to_email, settings.SMTP_FROM_EMAIL)
+        raise
+
+
+def _send_email_via_brevo_api(
+    to_email: str,
+    subject: str,
+    text: str,
+    html: str | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "sender": {
+            "name": settings.SMTP_FROM_NAME,
+            "email": settings.SMTP_FROM_EMAIL,
+        },
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": text,
+    }
+    if html:
+        payload["htmlContent"] = html
+    if attachments:
+        payload["attachment"] = [
+            {
+                "name": filename,
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+            for filename, content, _mime_type in attachments
+        ]
+
+    try:
+        response = httpx.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": settings.BREVO_API_KEY,
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        message_id = response.json().get("messageId") if response.content else None
+        logger.info(
+            "Sent Brevo API email subject=%r to=%s from=%s message_id=%s",
+            subject,
+            to_email,
+            settings.SMTP_FROM_EMAIL,
+            message_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed sending Brevo API email subject=%r to=%s from=%s",
+            subject,
+            to_email,
+            settings.SMTP_FROM_EMAIL,
+        )
         raise
 
 
