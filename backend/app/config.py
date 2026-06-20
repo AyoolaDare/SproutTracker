@@ -88,7 +88,10 @@ class Settings(BaseSettings):
     def normalize_async_database_url(cls, value: str) -> str:
         # Supabase often provides postgresql:// URLs. SQLAlchemy async needs asyncpg.
         if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # asyncpg does not accept libpq-style sslmode query parameters.
+        value = value.replace("?sslmode=require", "?ssl=require")
+        value = value.replace("&sslmode=require", "&ssl=require")
         return value
 
     @field_validator("DEBUG", mode="before")

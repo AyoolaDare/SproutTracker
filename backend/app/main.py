@@ -77,12 +77,14 @@ async def health():
 async def ready():
     redis = get_redis()
     database_ok = False
+    database_error = None
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         database_ok = True
-    except Exception:
+    except Exception as exc:
         database_ok = False
+        database_error = f"{type(exc).__name__}: {str(exc)[:180]}"
 
     redis_ok = redis is not None
     if redis is not None:
@@ -103,6 +105,7 @@ async def ready():
     return {
         "status": "ready" if dependencies_ok else "degraded",
         "database": database_ok,
+        "database_error": database_error,
         "redis": redis_ok,
         "smtp_configured": smtp_configured,
         "environment": app_settings.ENVIRONMENT,
