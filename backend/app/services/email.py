@@ -17,10 +17,16 @@ def send_email(
     attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> None:
     if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        logger.warning("SMTP is not configured; skipped email to %s", to_email)
+        message = f"SMTP is not configured; skipped email to {to_email}"
+        logger.error(message)
+        if settings.is_production:
+            raise RuntimeError(message)
         return
     if not settings.SMTP_FROM_EMAIL:
-        logger.warning("SMTP_FROM_EMAIL is not configured; skipped email to %s", to_email)
+        message = f"SMTP_FROM_EMAIL is not configured; skipped email to {to_email}"
+        logger.error(message)
+        if settings.is_production:
+            raise RuntimeError(message)
         return
 
     message = EmailMessage()
@@ -39,12 +45,17 @@ def send_email(
             filename=filename,
         )
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
-        server.ehlo()
-        server.starttls(context=ssl.create_default_context())
-        server.ehlo()
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(message)
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
+            server.ehlo()
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(message)
+        logger.info("Sent email subject=%r to=%s from=%s", subject, to_email, settings.SMTP_FROM_EMAIL)
+    except Exception:
+        logger.exception("Failed sending email subject=%r to=%s from=%s", subject, to_email, settings.SMTP_FROM_EMAIL)
+        raise
 
 
 def send_password_setup_email(to_email: str, setup_url: str) -> None:

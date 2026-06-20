@@ -92,10 +92,19 @@ async def ready():
             redis_ok = False
 
     dependencies_ok = database_ok and (redis_ok or not app_settings.REDIS_REQUIRED)
+    smtp_configured = all([
+        app_settings.SMTP_HOST,
+        app_settings.SMTP_USER,
+        app_settings.SMTP_PASSWORD,
+        app_settings.SMTP_FROM_EMAIL,
+    ])
+    if app_settings.is_production:
+        dependencies_ok = dependencies_ok and smtp_configured
     return {
         "status": "ready" if dependencies_ok else "degraded",
         "database": database_ok,
         "redis": redis_ok,
+        "smtp_configured": smtp_configured,
         "environment": app_settings.ENVIRONMENT,
     }
 

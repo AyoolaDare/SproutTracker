@@ -144,6 +144,18 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_URL is required when REDIS_REQUIRED=true.")
         if self.REDIS_REQUIRED and "REPLACE_" in self.REDIS_URL:
             raise ValueError("REDIS_URL still contains placeholders.")
+        missing_smtp = [
+            key
+            for key, value in {
+                "SMTP_HOST": self.SMTP_HOST,
+                "SMTP_USER": self.SMTP_USER,
+                "SMTP_PASSWORD": self.SMTP_PASSWORD,
+                "SMTP_FROM_EMAIL": self.SMTP_FROM_EMAIL,
+            }.items()
+            if not value or "REPLACE_" in value or "yourdomain.com" in value
+        ]
+        if missing_smtp:
+            raise ValueError(f"Production email is not configured: {', '.join(missing_smtp)}.")
         return self
 
 
