@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/api_client.dart';
+import '../../core/auth/token_store.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
   const ResetPasswordScreen({super.key, required this.token});
@@ -46,6 +47,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           'password': _password.text,
         },
       );
+      await ref.read(tokenStoreProvider).clear();
       if (!mounted) return;
       setState(() => _done = true);
     } on DioException catch (e) {

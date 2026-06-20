@@ -5,9 +5,17 @@ import 'package:responsive_framework/responsive_framework.dart';
 
 import 'app/app_router.dart';
 import 'app/app_theme.dart';
+import 'core/auth/token_store.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   usePathUrlStrategy();
+
+  final uri = Uri.base;
+  if (uri.path == '/reset-password' && (uri.queryParameters['token'] ?? '').isNotEmpty) {
+    await const TokenStore().clear();
+  }
+
   runApp(const ProviderScope(child: SproutTrackApp()));
 }
 

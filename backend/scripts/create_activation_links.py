@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import os
 import secrets
 import sys
 from datetime import datetime, timedelta, timezone
@@ -8,8 +9,6 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from app.config import get_settings
 
 
 def token_hash(token: str) -> str:
@@ -21,11 +20,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frontend-url", required=True, help="Flutter/Vercel frontend URL.")
     parser.add_argument("--email", default="", help="Create a link for one email only.")
     parser.add_argument("--expires-hours", type=int, default=72)
+    parser.add_argument("--send-email", action="store_true", help="Email each setup link using configured SMTP.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+
+    # This CLI can target production DB/SMTP from a local machine, but it is not
+    # serving browser traffic. Avoid blocking on web runtime host/CORS checks.
+    os.environ["ENVIRONMENT"] = "development"
+    os.environ["FRONTEND_URL"] = args.frontend_url.rstrip("/")
+
+    from app.config import get_settings
+    from app.services.email import send_password_setup_email
+
     settings = get_settings()
     engine = create_engine(settings.sync_database_url, future=True, pool_pre_ping=True)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=args.expires_hours)
@@ -47,6 +56,7 @@ def main() -> int:
         users = conn.execute(text(query), params).mappings().all()
         for user in users:
             token = secrets.token_urlsafe(48)
+            setup_url = f"{frontend_url}/reset-password?token={token}"
             conn.execute(
                 text(
                     """
@@ -63,7 +73,11 @@ def main() -> int:
                     "user_id": user["id"],
                 },
             )
-            print(f"{user['email']} {frontend_url}/reset-password?token={token}")
+            if args.send_email:
+                send_password_setup_email(user["email"], setup_url)
+                print(f"sent {user['email']}")
+            else:
+                print(f"{user['email']} {setup_url}")
 
     print(f"created_links={len(users)} expires_at={expires_at.isoformat()}")
     return 0

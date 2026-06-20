@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/auth/auth_provider.dart';
+import '../features/auth/forgot_password_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/reset_password_screen.dart';
+import '../features/auth/signup_screen.dart';
 import '../features/customers/customers_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/expenses/expenses_screen.dart';
@@ -33,25 +35,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     initialLocation: '/',
-    // Re-evaluate redirect every time auth state changes
     refreshListenable: GoRouterRefreshStream(authNotifier.stream),
     redirect: (context, routerState) {
-      final auth      = ref.read(authProvider);
-      final isOnLogin = routerState.matchedLocation == '/login';
-      final isOnReset = routerState.matchedLocation == '/reset-password';
+      final auth = ref.read(authProvider);
+      final loc = routerState.matchedLocation;
+      final isOnLogin  = loc == '/login';
+      final isPublic   = loc == '/reset-password' || loc == '/signup' || loc == '/forgot-password';
 
-      // Still initialising — don't redirect, AppShell shows a spinner instead
+      if (isPublic) return null;
       if (auth.status == AuthStatus.loading) return null;
-
-      // Force unauthenticated users to the login page
-      if (auth.status == AuthStatus.unauthenticated && !isOnLogin && !isOnReset) {
-        return '/login';
-      }
-
-      // Authenticated user hitting the login page — send home
-      if (auth.status == AuthStatus.authenticated && (isOnLogin || isOnReset)) {
-        return '/';
-      }
+      if (auth.status == AuthStatus.unauthenticated && !isOnLogin) return '/login';
+      if (auth.status == AuthStatus.authenticated && isOnLogin) return '/';
 
       return null;
     },
@@ -61,6 +55,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _fadePage(
           state: state,
           child: const LoginScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/signup',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const SignupScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const ForgotPasswordScreen(),
         ),
       ),
       GoRoute(
