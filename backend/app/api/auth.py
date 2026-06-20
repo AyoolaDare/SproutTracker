@@ -22,7 +22,10 @@ from app.middleware.auth import (
     token_ttl_seconds,
 )
 from app.schemas.auth import (
+    EmailVerificationConfirm,
+    GoogleAuthRequest,
     RegisterRequest,
+    RegisterResponse,
     LoginRequest,
     RefreshRequest,
     PasswordResetConfirm,
@@ -32,7 +35,11 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.config import get_settings
-from app.services.email import send_password_setup_email
+from app.services.email import (
+    send_email_verification_email,
+    send_password_setup_email,
+    send_welcome_email,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 settings = get_settings()
@@ -40,6 +47,7 @@ settings = get_settings()
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 PASSWORD_RESET_MINUTES = 60
+EMAIL_VERIFICATION_HOURS = 24
 
 
 def hash_reset_token(token: str) -> str:
@@ -55,12 +63,34 @@ def issue_password_reset_token(user: User) -> str:
     return token
 
 
-@router.post("/register", response_model=TokenResponse)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+def issue_email_verification_token(user: User) -> str:
+    token = secrets.token_urlsafe(48)
+    user.email_verification_token_hash = hash_reset_token(token)
+    user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=EMAIL_VERIFICATION_HOURS
+    )
+    return token
+
+
+def token_response_for(user: User) -> TokenResponse:
+    token_data = {"sub": user.id, "tenant_id": user.tenant_id, "role": user.role.value}
+    return TokenResponse(
+        access_token=create_access_token(token_data),
+        refresh_token=create_refresh_token(token_data),
+        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post("/register", response_model=RegisterResponse)
+async def register(
+    req: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=409, detail="Email already registered")
 
     # Create tenant (business)
     tenant = Tenant(
@@ -82,16 +112,18 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         password_set_at=datetime.now(timezone.utc),
         full_name=req.full_name,
         role=UserRole.OWNER,
+        is_active=False,
     )
     db.add(user)
+    token = issue_email_verification_token(user)
     await db.commit()
-    await db.refresh(user)
 
-    token_data = {"sub": user.id, "tenant_id": tenant.id, "role": user.role.value}
-    return TokenResponse(
-        access_token=create_access_token(token_data),
-        refresh_token=create_refresh_token(token_data),
-        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={token}"
+    background_tasks.add_task(send_email_verification_email, user.email, verify_url)
+    return RegisterResponse(
+        success=True,
+        message="Account created. Check your email to verify your account.",
+        requires_email_verification=True,
     )
 
 
@@ -108,6 +140,15 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
         raise HTTPException(
             status_code=403,
             detail="Account locked due to too many failed attempts. Try again later.",
+        )
+
+    if user.email_verified_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "EMAIL_VERIFICATION_REQUIRED",
+                "message": "Verify your email address before signing in.",
+            },
         )
 
     if user.password_set_at is None:
@@ -140,12 +181,113 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     tenant_result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = tenant_result.scalar_one_or_none()
 
-    token_data = {"sub": user.id, "tenant_id": user.tenant_id, "role": user.role.value}
-    return TokenResponse(
-        access_token=create_access_token(token_data),
-        refresh_token=create_refresh_token(token_data),
-        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    return token_response_for(user)
+
+
+@router.post("/email/verify", response_model=PasswordResetResponse)
+async def verify_email(
+    req: EmailVerificationConfirm,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    token_hash = hash_reset_token(req.token)
+    result = await db.execute(
+        select(User).where(User.email_verification_token_hash == token_hash)
     )
+    user = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not user or not user.email_verification_expires_at or user.email_verification_expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+
+    user.email_verified_at = now
+    user.email_verification_token_hash = None
+    user.email_verification_expires_at = None
+    user.is_active = True
+    await db.commit()
+
+    background_tasks.add_task(send_welcome_email, user.email, user.full_name)
+    return PasswordResetResponse(success=True, message="Email verified. You can now sign in.")
+
+
+@router.post("/email/resend", response_model=PasswordResetResponse)
+async def resend_verification_email(
+    req: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == req.email))
+    user = result.scalar_one_or_none()
+    if user and user.email_verified_at is None:
+        token = issue_email_verification_token(user)
+        await db.commit()
+        verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={token}"
+        background_tasks.add_task(send_email_verification_email, user.email, verify_url)
+
+    return PasswordResetResponse(
+        success=True,
+        message="If that account needs verification, a new email has been sent.",
+    )
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_auth(req: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Google auth dependency is not installed")
+
+    try:
+        payload = google_id_token.verify_oauth2_token(
+            req.id_token,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    if not payload.get("email_verified"):
+        raise HTTPException(status_code=403, detail="Google email is not verified")
+
+    email = str(payload["email"]).lower()
+    subject = str(payload["sub"])
+    full_name = payload.get("name") or email.split("@")[0]
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if not user:
+        tenant = Tenant(
+            business_name=req.business_name or f"{full_name}'s Business",
+            business_type=req.business_type,
+        )
+        db.add(tenant)
+        await db.flush()
+        db.add(TaxSettings(tenant_id=tenant.id))
+        user = User(
+            tenant_id=tenant.id,
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            password_set_at=None,
+            email_verified_at=datetime.now(timezone.utc),
+            full_name=full_name,
+            role=UserRole.OWNER,
+            is_active=True,
+            oauth_provider="google",
+            oauth_subject=subject,
+        )
+        db.add(user)
+    else:
+        user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
+        user.is_active = True
+        user.oauth_provider = user.oauth_provider or "google"
+        user.oauth_subject = user.oauth_subject or subject
+
+    await db.commit()
+    await db.refresh(user)
+    return token_response_for(user)
 
 
 @router.post("/password-reset/request", response_model=PasswordResetResponse)

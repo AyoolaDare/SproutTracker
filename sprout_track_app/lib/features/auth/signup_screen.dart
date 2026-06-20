@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/api_client.dart';
-import '../../core/auth/token_store.dart';
 
 const _businessTypes = [
   ('RETAIL', 'Retail / Shop'),
@@ -218,6 +217,7 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
   String _businessType = 'RETAIL';
   bool _obscure        = true;
   bool _loading        = false;
+  bool _created        = false;
   String? _error;
 
   @override
@@ -236,7 +236,7 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
 
     try {
       final api = ref.read(apiClientProvider);
-      final res = await api.post(
+      await api.post(
         '/api/auth/register',
         data: {
           'full_name':     _fullName.text.trim(),
@@ -246,12 +246,7 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
           'business_type': _businessType,
         },
       );
-      final data = res.data as Map<String, dynamic>;
-      await ref.read(tokenStoreProvider).saveTokens(
-        accessToken:  data['access_token']  as String,
-        refreshToken: data['refresh_token'] as String? ?? '',
-      );
-      if (mounted) context.go('/');
+      if (mounted) setState(() => _created = true);
     } on DioException catch (e) {
       final code   = e.response?.statusCode;
       final detail = e.response?.data is Map<String, dynamic>
@@ -280,7 +275,9 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
       padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 32),
       child: Form(
         key: _formKey,
-        child: Column(
+        child: _created
+            ? _SignupSuccess(email: _email.text.trim().toLowerCase())
+            : Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (!widget.isNarrow) ...[
@@ -491,8 +488,46 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
               ],
             ),
           ],
-        ),
+              ),
       ),
+    );
+  }
+}
+
+class _SignupSuccess extends StatelessWidget {
+  const _SignupSuccess({required this.email});
+
+  final String email;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
+        const SizedBox(height: 18),
+        Text(
+          'Check your email',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'We sent a verification link to $email. Verify your email, then sign in.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: () => context.go('/login'),
+          child: const Text('Back to sign in'),
+        ),
+      ],
     );
   }
 }

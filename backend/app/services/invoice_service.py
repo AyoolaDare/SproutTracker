@@ -151,7 +151,7 @@ async def finalize_invoice(
     3. Deduct stock
     4. Update status to SENT
     """
-    if invoice.status != InvoiceStatus.DRAFT:
+    if invoice.status not in {InvoiceStatus.DRAFT, InvoiceStatus.QUOTATION, InvoiceStatus.PROFORMA}:
         raise ValueError(f"Cannot finalize invoice in {invoice.status.value} status")
 
     # Load items
@@ -289,7 +289,7 @@ async def void_invoice(
         raise ValueError("Invoice is already voided")
 
     # Reverse stock if it was finalized
-    if invoice.status != InvoiceStatus.DRAFT:
+    if invoice.status in {InvoiceStatus.SENT, InvoiceStatus.VIEWED, InvoiceStatus.OVERDUE}:
         result = await db.execute(
             select(InvoiceItem).where(InvoiceItem.invoice_id == invoice.id)
         )

@@ -55,5 +55,7 @@ services:
         sync: false
       - key: SMTP_FROM_NAME
         value: Sprout Track
+      - key: GOOGLE_CLIENT_ID
+        sync: false
       - key: SENTRY_DSN
         sync: false

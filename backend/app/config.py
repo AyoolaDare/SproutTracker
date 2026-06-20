@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = ""
     SMTP_FROM_NAME: str = "Sprout Track"
 
+    # Social sign-in
+    GOOGLE_CLIENT_ID: str = ""
+
     # Observability
     SENTRY_DSN: str = ""
 

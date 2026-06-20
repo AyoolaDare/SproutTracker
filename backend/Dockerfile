@@ -7,7 +7,9 @@ ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev curl && \
+    build-essential libpq-dev curl \
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
+    libjpeg62-turbo libopenjp2-7 libffi8 shared-mime-info && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

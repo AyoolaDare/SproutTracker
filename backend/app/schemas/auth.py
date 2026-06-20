@@ -9,6 +9,12 @@ class RegisterRequest(BaseModel):
     business_type: str = "RETAIL"
 
 
+class RegisterResponse(BaseModel):
+    success: bool
+    message: str
+    requires_email_verification: bool = True
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -25,6 +31,16 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str = Field(min_length=32, max_length=300)
     password: str = Field(min_length=8, max_length=100)
+
+
+class EmailVerificationConfirm(BaseModel):
+    token: str = Field(min_length=32, max_length=300)
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str = Field(min_length=20)
+    business_name: str | None = Field(default=None, max_length=200)
+    business_type: str = "RETAIL"
 
 
 class PasswordResetResponse(BaseModel):

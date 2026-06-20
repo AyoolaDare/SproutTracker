@@ -231,36 +231,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     ref.read(authProvider.notifier).login(_email.text.trim(), _password.text);
   }
 
-  Future<void> _requestPasswordReset() async {
-    final email = _email.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter your email address first.')),
-      );
-      _emailFocus.requestFocus();
-      return;
-    }
-
-    try {
-      await ref.read(apiClientProvider).post(
-        '/api/auth/password-reset/request',
-        data: {'email': email},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('If the email exists, a password setup link has been sent.'),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not request password setup. Try again shortly.'),
-        ),
-      );
-    }
-  }
+  void _goToForgotPassword() => context.push('/forgot-password');
 
   @override
   Widget build(BuildContext context) {
@@ -356,7 +327,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
-                  onPressed: isLoading ? null : _requestPasswordReset,
+                  onPressed: isLoading ? null : _goToForgotPassword,
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     minimumSize: Size.zero,
@@ -450,6 +421,28 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                     : () => ref.read(authProvider.notifier).loginDemo(),
                 icon: const Icon(Icons.bolt_rounded, size: 18),
                 label: const Text('Continue with demo data'),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'New to Sprout Track? ',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  GestureDetector(
+                    onTap: isLoading ? null : () => context.push('/signup'),
+                    child: Text(
+                      'Create account',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppTheme.moss,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -7,6 +7,8 @@ import enum
 
 
 class InvoiceStatus(str, enum.Enum):
+    QUOTATION = "QUOTATION"
+    PROFORMA = "PROFORMA"
     DRAFT = "DRAFT"
     SENT = "SENT"
     VIEWED = "VIEWED"

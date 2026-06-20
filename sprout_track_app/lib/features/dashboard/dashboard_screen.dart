@@ -5,11 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
-import '../../core/state/sprout_state.dart';
+import '../../core/api/features/dashboard_provider.dart';
 import '../../shared/formatters.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/sprout_card.dart';
@@ -21,28 +20,10 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data       = ref.watch(sproutStoreProvider);
-    final bp         = ResponsiveBreakpoints.of(context);
-    final isMobile   = bp.isMobile;
-    final metricCols = isMobile ? 2 : (bp.isTablet ? 2 : 4);
-
-    final paidInvoices  = data.invoices.where((i) => i.derivedStatus == InvoiceStatus.paid);
-    final totalRevenue  = paidInvoices.fold<num>(0, (s, i) => s + (i.amountPaid == 0 ? i.amount : i.amountPaid));
-    final totalExpenses = data.expenses.fold<num>(0, (s, e) => s + e.amount);
-    final netProfit     = totalRevenue - totalExpenses;
-    final stockValue    = data.inventory.fold<num>(0, (s, i) => s + i.stockValue);
-    final outstanding   = data.invoices.fold<num>(0, (s, i) => s + i.amountDue);
-
-    final profitMargin = totalRevenue == 0 ? 0.0 : (netProfit / totalRevenue) * 100;
-
-    final metrics = [
-      _MetricData('Revenue',    totalRevenue,  18.4,  _MetricKind.cashIn),
-      _MetricData('Expenses',   totalExpenses, -6.2,  _MetricKind.cashOut),
-      _MetricData('Net profit', netProfit,     profitMargin, _MetricKind.neutral),
-      _MetricData('Stock value', stockValue, outstanding == 0 ? 0.0 : -(outstanding / stockValue * 100).clamp(0.0, 100.0).toDouble(), _MetricKind.neutral),
-    ];
-
-    final cashFlow = _monthlyCashFlow(data);
+    final metricsAsync = ref.watch(dashboardProvider);
+    final bp           = ResponsiveBreakpoints.of(context);
+    final isMobile     = bp.isMobile;
+    final metricCols   = isMobile ? 2 : (bp.isTablet ? 2 : 4);
 
     return SproutPage(
       title: 'Business overview',
@@ -53,36 +34,70 @@ class DashboardScreen extends ConsumerWidget {
         label: const Text('New invoice'),
       ),
       children: [
-        // ── KPI tiles ──────────────────────────────────────────────────────────
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: metrics.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: metricCols,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            mainAxisExtent: isMobile ? 110 : 124,
+        metricsAsync.when(
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: CircularProgressIndicator(),
+            ),
           ),
-          itemBuilder: (context, i) => _MetricTile(metrics[i]),
-        ),
-        const SizedBox(height: 14),
-
-        // ── Cash flow + inventory health ────────────────────────────────────
-        _TwoColumnLayout(
-          threshold: 860,
-          leftFlex: 7,
-          rightFlex: 5,
-          left: _CashFlowCard(points: cashFlow),
-          right: _HealthCard(items: data.inventory),
-        ),
-        const SizedBox(height: 14),
-
-        // ── Recent activity ─────────────────────────────────────────────────
-        _TwoColumnLayout(
-          threshold: 860,
-          left: _InvoiceActivity(invoices: data.invoices.take(5).toList()),
-          right: _ExpenseActivity(expenses: data.expenses.take(5).toList()),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text(
+                'Could not load dashboard. Pull to refresh.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          ),
+          data: (m) {
+            final metrics = [
+              _MetricData('Revenue',     m.revenueThisMonth,  m.revenueChangePct,  _MetricKind.cashIn),
+              _MetricData('Expenses',    m.expensesThisMonth, m.expensesChangePct, _MetricKind.cashOut),
+              _MetricData('Net profit',  m.netProfit,         m.profitMargin,      _MetricKind.neutral),
+              _MetricData('Outstanding', m.outstandingBalance,
+                m.outstandingBalance == 0 ? 0.0
+                    : -(m.outstandingBalance / (m.stockValue == 0 ? 1 : m.stockValue) * 100).clamp(0.0, 100.0),
+                _MetricKind.neutral,
+              ),
+            ];
+            final cashFlow = m.monthlyCashFlow
+                .map((p) => _CashFlowPoint(p.month, p.income / 1000000, p.expenses / 1000000))
+                .toList();
+            return Column(
+              children: [
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: metrics.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: metricCols,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: isMobile ? 110 : 124,
+                  ),
+                  itemBuilder: (context, i) => _MetricTile(metrics[i]),
+                ),
+                const SizedBox(height: 14),
+                _TwoColumnLayout(
+                  threshold: 860,
+                  leftFlex: 7,
+                  rightFlex: 5,
+                  left: _CashFlowCard(points: cashFlow),
+                  right: _HealthCard(
+                    lowStockCount: m.lowStockCount,
+                    stockValue:    m.stockValue,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _TwoColumnLayout(
+                  threshold: 860,
+                  left: _InvoiceActivity(invoices: m.recentInvoices),
+                  right: _ExpenseActivity(expenses: m.recentExpenses),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -343,19 +358,17 @@ class _CashFlowCard extends StatelessWidget {
 // ── Inventory health card ──────────────────────────────────────────────────────
 
 class _HealthCard extends StatelessWidget {
-  const _HealthCard({required this.items});
-  final List<InventoryItem> items;
+  const _HealthCard({required this.lowStockCount, required this.stockValue});
+  final int    lowStockCount;
+  final double stockValue;
 
   @override
   Widget build(BuildContext context) {
-    final total    = items.length;
-    final healthy  = items.where((e) => e.quantity > e.reorderLevel).length;
-    final lowStock = total - healthy;
-    final progress = total == 0 ? 0.0 : healthy / total;
-    final pct      = (progress * 100).round();
-
-    final arcColor = pct >= 70 ? AppTheme.moss : pct >= 40 ? AppTheme.ochre : AppTheme.terracotta;
-    final status   = pct >= 70 ? 'Good' : pct >= 40 ? 'Fair' : 'Critical';
+    final arcColor = lowStockCount == 0 ? AppTheme.moss
+        : lowStockCount <= 3 ? AppTheme.ochre
+        : AppTheme.terracotta;
+    final status   = lowStockCount == 0 ? 'Good' : lowStockCount <= 3 ? 'Fair' : 'Critical';
+    final progress = lowStockCount == 0 ? 1.0 : lowStockCount <= 3 ? 0.55 : 0.25;
 
     return SproutCard(
       child: Column(
@@ -374,14 +387,14 @@ class _HealthCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '$pct%',
+                        status,
                         style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                               color: arcColor,
                             ),
                       ),
                       Text(
-                        status,
+                        compactMoney(stockValue),
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
@@ -396,15 +409,15 @@ class _HealthCard extends StatelessWidget {
           Row(
             children: [
               _HealthChip(
-                icon: Icons.check_circle_outline_rounded,
-                label: '$healthy of $total healthy',
+                icon: Icons.inventory_2_outlined,
+                label: 'Stock value',
                 color: AppTheme.moss,
               ),
               const SizedBox(width: 10),
               _HealthChip(
                 icon: Icons.warning_amber_rounded,
-                label: '$lowStock low stock',
-                color: lowStock > 0 ? AppTheme.terracotta : AppTheme.moss,
+                label: '$lowStockCount low stock',
+                color: lowStockCount > 0 ? AppTheme.terracotta : AppTheme.moss,
               ),
             ],
           ),
@@ -502,7 +515,7 @@ class _HealthArcPainter extends CustomPainter {
 
 class _InvoiceActivity extends StatelessWidget {
   const _InvoiceActivity({required this.invoices});
-  final List<Invoice> invoices;
+  final List<RecentInvoice> invoices;
 
   @override
   Widget build(BuildContext context) {
@@ -556,7 +569,7 @@ class _InvoiceActivity extends StatelessWidget {
 
 class _InvoiceRow extends StatelessWidget {
   const _InvoiceRow(this.invoice);
-  final Invoice invoice;
+  final RecentInvoice invoice;
 
   @override
   Widget build(BuildContext context) {
@@ -599,13 +612,13 @@ class _InvoiceRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                compactMoney(invoice.amount),
+                compactMoney(invoice.totalAmount),
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w900,
                     ),
               ),
               const SizedBox(height: 4),
-              StatusPill(invoice.derivedStatus.label),
+              StatusPill(invoice.status),
             ],
           ),
         ],
@@ -618,7 +631,7 @@ class _InvoiceRow extends StatelessWidget {
 
 class _ExpenseActivity extends StatelessWidget {
   const _ExpenseActivity({required this.expenses});
-  final List<Expense> expenses;
+  final List<RecentExpense> expenses;
 
   @override
   Widget build(BuildContext context) {
@@ -672,7 +685,7 @@ class _ExpenseActivity extends StatelessWidget {
 
 class _ExpenseRow extends StatelessWidget {
   const _ExpenseRow(this.expense);
-  final Expense expense;
+  final RecentExpense expense;
 
   @override
   Widget build(BuildContext context) {
@@ -770,21 +783,4 @@ class _CashFlowPoint {
   final double expenses;  // in millions
 }
 
-List<_CashFlowPoint> _monthlyCashFlow(SproutState state) {
-  final now = DateTime.now();
-  return [
-    for (var i = 5; i >= 0; i--)
-      () {
-        final m = DateTime(now.year, now.month - i);
-        bool same(DateTime d) => d.year == m.year && d.month == m.month;
-        final inc = state.invoices
-            .where((inv) => inv.derivedStatus == InvoiceStatus.paid && same(inv.issueDate))
-            .fold<num>(0, (s, inv) => s + (inv.amountPaid == 0 ? inv.amount : inv.amountPaid));
-        final exp = state.expenses
-            .where((e) => same(e.date))
-            .fold<num>(0, (s, e) => s + e.amount);
-        return _CashFlowPoint(DateFormat('MMM').format(m), inc / 1000000, exp / 1000000);
-      }(),
-  ];
-}
 

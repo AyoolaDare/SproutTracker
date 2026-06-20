@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
@@ -16,6 +17,7 @@ from app.schemas.invoice import (
     InvoiceItemResponse,
     PaymentResponse,
     RecordPaymentRequest,
+    SendInvoiceEmailRequest,
 )
 from app.services.invoice_service import (
     create_draft_invoice,
@@ -25,8 +27,12 @@ from app.services.invoice_service import (
 )
 from app.services.audit import log_action
 from app.services.cache import invalidate_tenant_dashboard
+from app.services.email import send_invoice_email
+from app.services.invoice_pdf import render_invoice_pdf
+from app.config import get_settings
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
+settings = get_settings()
 
 
 async def ensure_customer_belongs_to_tenant(
@@ -100,6 +106,30 @@ def invoice_to_response(invoice: Invoice) -> InvoiceResponse:
     )
 
 
+async def load_invoice_or_404(
+    db: AsyncSession,
+    invoice_id: str,
+    tenant_id: str | None = None,
+) -> Invoice:
+    query = (
+        select(Invoice)
+        .options(
+            selectinload(Invoice.tenant),
+            selectinload(Invoice.customer),
+            selectinload(Invoice.items),
+            selectinload(Invoice.payments),
+        )
+        .where(Invoice.id == invoice_id)
+    )
+    if tenant_id:
+        query = query.where(Invoice.tenant_id == tenant_id)
+    result = await db.execute(query)
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice
+
+
 @router.get("")
 async def list_invoices(
     page: int = Query(1, ge=1),
@@ -150,6 +180,29 @@ async def list_invoices(
     }
 
 
+@router.get("/verify/{invoice_id}")
+async def verify_invoice_public(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    invoice = await load_invoice_or_404(db, invoice_id)
+    return {
+        "success": True,
+        "data": {
+            "valid": True,
+            "invoice_number": invoice.invoice_number,
+            "document_type": invoice.status.value,
+            "status": invoice.status.value,
+            "payment_status": invoice.payment_status.value,
+            "customer_name": invoice.customer.name if invoice.customer else None,
+            "business_name": invoice.tenant.business_name if invoice.tenant else None,
+            "invoice_date": invoice.invoice_date.isoformat(),
+            "total_amount": float(invoice.total_amount),
+            "outstanding_amount": float(invoice.outstanding_amount),
+        },
+    }
+
+
 @router.get("/{invoice_id}")
 async def get_invoice(
     invoice_id: str,
@@ -165,6 +218,43 @@ async def get_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {"success": True, "data": invoice_to_response(invoice)}
+
+
+@router.get("/{invoice_id}/pdf")
+async def get_invoice_pdf(
+    invoice_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    invoice = await load_invoice_or_404(db, invoice_id, user.tenant_id)
+    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-invoice/{invoice.id}"
+    pdf = render_invoice_pdf(invoice, verify_url)
+    filename = f"{invoice.invoice_number}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("/{invoice_id}/send-email")
+async def email_invoice(
+    invoice_id: str,
+    req: SendInvoiceEmailRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    invoice = await load_invoice_or_404(db, invoice_id, user.tenant_id)
+    recipient = req.to_email or (invoice.customer.email if invoice.customer else None)
+    if not recipient:
+        raise HTTPException(status_code=400, detail="Customer email is required")
+
+    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-invoice/{invoice.id}"
+    pdf = render_invoice_pdf(invoice, verify_url)
+    send_invoice_email(recipient, invoice.invoice_number, pdf, req.message)
+    await log_action(db, user.tenant_id, user.id, "EMAIL", "Invoice", invoice_id)
+    await db.commit()
+    return {"success": True, "message": f"Invoice emailed to {recipient}"}
 
 
 @router.post("", status_code=201)
@@ -208,6 +298,10 @@ async def create_invoice(
         vat_rate=vat_rate,
         wht_rate=wht_rate,
     )
+    if req.status in {"QUOTATION", "PROFORMA"}:
+        invoice.status = InvoiceStatus(req.status)
+    elif req.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="status must be DRAFT, QUOTATION, or PROFORMA")
 
     await log_action(db, user.tenant_id, user.id, "CREATE", "Invoice", invoice.id)
     await db.commit()

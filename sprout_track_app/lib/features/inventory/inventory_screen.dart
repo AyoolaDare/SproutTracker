@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/api/features/products_provider.dart';
 import '../../core/state/sprout_state.dart';
 import '../../shared/formatters.dart';
 import '../../shared/widgets/section_header.dart';
@@ -13,8 +14,9 @@ class InventoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state  = ref.watch(sproutStoreProvider);
-    final scheme = Theme.of(context).colorScheme;
+    final productsAsync   = ref.watch(productsProvider);
+    final historyEntries  = ref.watch(sproutStoreProvider).inventoryHistory;
+    final scheme          = Theme.of(context).colorScheme;
 
     return SproutPage(
       title: 'Inventory',
@@ -28,55 +30,70 @@ class InventoryScreen extends ConsumerWidget {
         label: const Text('Add product'),
       ),
       children: [
-        if (state.inventory.isEmpty)
-          SproutCard(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.inventory_2_rounded,
-                      size: 40,
-                      color: scheme.onSurfaceVariant.withValues(alpha: .35),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No products yet. Add your first product to begin tracking stock.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+        productsAsync.when(
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text(
+                'Could not load products.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
-          )
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: state.inventory.length,
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 340,
-              mainAxisExtent: 234,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-            ),
-            itemBuilder: (context, i) => _InventoryTile(state.inventory[i]),
           ),
+          data: (products) => products.isEmpty
+              ? SproutCard(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.inventory_2_rounded,
+                            size: 40,
+                            color: scheme.onSurfaceVariant.withValues(alpha: .35),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No products yet. Add your first product to begin tracking stock.',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              : GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: products.length,
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 340,
+                    mainAxisExtent: 234,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                  ),
+                  itemBuilder: (context, i) => _InventoryTile(products[i]),
+                ),
+        ),
 
         const SizedBox(height: 20),
 
-        // ── Inventory history ──────────────────────────────────────────────
         SproutCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SectionHeader(title: 'Movement history'),
               const SizedBox(height: 14),
-              if (state.inventoryHistory.isEmpty)
+              if (historyEntries.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Center(
@@ -89,10 +106,10 @@ class InventoryScreen extends ConsumerWidget {
                   ),
                 )
               else
-                for (var i = 0; i < state.inventoryHistory.take(10).length; i++) ...[
+                for (var i = 0; i < historyEntries.take(10).length; i++) ...[
                   if (i > 0)
                     Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: .4)),
-                  _HistoryRow(state.inventoryHistory.elementAt(i)),
+                  _HistoryRow(historyEntries.elementAt(i)),
                 ],
             ],
           ),
@@ -171,7 +188,7 @@ class _HistoryRow extends StatelessWidget {
 
 class _InventoryTile extends ConsumerWidget {
   const _InventoryTile(this.item);
-  final InventoryItem item;
+  final ApiProduct item;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -179,7 +196,7 @@ class _InventoryTile extends ConsumerWidget {
     final tileColor   = low ? AppTheme.terracotta : AppTheme.moss;
     final stockHealth = item.reorderLevel == 0
         ? 1.0
-        : (item.quantity / (item.reorderLevel * 2)).clamp(0.0, 1.0);
+        : (item.currentStock / (item.reorderLevel * 2)).clamp(0.0, 1.0);
     final scheme      = Theme.of(context).colorScheme;
 
     return SproutCard(
@@ -218,7 +235,7 @@ class _InventoryTile extends ConsumerWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${item.sku} · ${item.category}',
+            '${item.sku} · ${item.category ?? '—'}',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
@@ -253,7 +270,7 @@ class _InventoryTile extends ConsumerWidget {
           // Stats row
           Row(
             children: [
-              Expanded(child: _Stat(label: 'On hand', value: '${item.quantity} units')),
+              Expanded(child: _Stat(label: 'On hand', value: '${item.currentStock} units')),
               Expanded(child: _Stat(label: 'Value', value: compactMoney(item.stockValue))),
             ],
           ),
@@ -278,7 +295,7 @@ class _InventoryTile extends ConsumerWidget {
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Remove product',
-                onPressed: () => ref.read(sproutStoreProvider.notifier).deleteInventoryItem(item.id),
+                onPressed: () => ref.read(productsProvider.notifier).deleteProduct(item.id),
                 icon: const Icon(Icons.delete_outline_rounded),
                 iconSize: 20,
                 style: IconButton.styleFrom(
@@ -398,17 +415,16 @@ class _AddProductDialogState extends ConsumerState<_AddProductDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
-            ref.read(sproutStoreProvider.notifier).addProduct(
+          onPressed: () async {
+            await ref.read(productsProvider.notifier).addProduct(
                   name: name.text,
-                  sku: sku.text,
-                  category: category.text,
-                  supplier: supplier.text,
-                  unitCost: num.tryParse(unitCost.text) ?? 0,
-                  quantity: int.tryParse(quantity.text) ?? 0,
+                  sku: sku.text.isEmpty ? null : sku.text,
+                  category: category.text.isEmpty ? null : category.text,
+                  supplier: supplier.text.isEmpty ? null : supplier.text,
+                  sellingPrice: double.tryParse(unitCost.text) ?? 0,
                   reorderLevel: int.tryParse(reorderLevel.text) ?? 0,
                 );
-            Navigator.pop(context);
+            if (context.mounted) Navigator.pop(context);
           },
           child: const Text('Add product'),
         ),
@@ -421,7 +437,7 @@ class _AddProductDialogState extends ConsumerState<_AddProductDialog> {
 
 class _AdjustStockDialog extends ConsumerStatefulWidget {
   const _AdjustStockDialog({required this.item});
-  final InventoryItem item;
+  final ApiProduct item;
 
   @override
   ConsumerState<_AdjustStockDialog> createState() => _AdjustStockDialogState();
@@ -454,7 +470,7 @@ class _AdjustStockDialogState extends ConsumerState<_AdjustStockDialog> {
             child: Row(
               children: [
                 Expanded(child: Text('Current stock', style: Theme.of(context).textTheme.bodyMedium)),
-                Text('${widget.item.quantity} units', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+                Text('${widget.item.currentStock} units', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
               ],
             ),
           ),
@@ -473,16 +489,20 @@ class _AdjustStockDialogState extends ConsumerState<_AdjustStockDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
+          onPressed: () async {
             try {
-              ref.read(sproutStoreProvider.notifier).adjustInventory(
-                    itemId: widget.item.id,
-                    adjustment: int.parse(adjustment.text),
+              await ref.read(productsProvider.notifier).adjustStock(
+                    productId: widget.item.id,
+                    quantity: int.parse(adjustment.text),
                     reason: reason.text,
                   );
-              Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
             } catch (e) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(e.toString())),
+                );
+              }
             }
           },
           child: const Text('Save adjustment'),

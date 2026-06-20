@@ -12,7 +12,9 @@ Future<void> main() async {
   usePathUrlStrategy();
 
   final uri = Uri.base;
-  if (uri.path == '/reset-password' && (uri.queryParameters['token'] ?? '').isNotEmpty) {
+  final isTokenLink = (uri.path == '/reset-password' || uri.path == '/verify-email') &&
+      (uri.queryParameters['token'] ?? '').isNotEmpty;
+  if (isTokenLink) {
     await const TokenStore().clear();
   }
 

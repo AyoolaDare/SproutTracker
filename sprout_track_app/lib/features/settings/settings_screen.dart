@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/api/features/settings_provider.dart';
 import '../../core/auth/auth_provider.dart';
-import '../../core/state/sprout_state.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/sprout_card.dart';
 import '../../shared/widgets/sprout_page.dart';
@@ -13,24 +13,35 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(sproutStoreProvider).businessProfile;
-    final scheme  = Theme.of(context).colorScheme;
+    final profileAsync = ref.watch(settingsProvider);
+    final scheme       = Theme.of(context).colorScheme;
 
-    final initials = profile.businessName.isNotEmpty
-        ? profile.businessName.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
-        : 'ST';
-
-    return SproutPage(
-      title: 'Settings',
-      subtitle: 'Business profile, taxes, bank details, and notification controls.',
-      action: FilledButton.icon(
-        onPressed: () => showDialog<void>(
-          context: context,
-          builder: (_) => _BusinessProfileDialog(profile: profile),
-        ),
-        icon: const Icon(Icons.edit_rounded, size: 18),
-        label: const Text('Edit profile'),
+    return profileAsync.when(
+      loading: () => const SproutPage(
+        title: 'Settings',
+        subtitle: 'Business profile, taxes, bank details, and notification controls.',
+        children: [Center(child: Padding(padding: EdgeInsets.all(60), child: CircularProgressIndicator()))],
       ),
+      error: (e, _) => SproutPage(
+        title: 'Settings',
+        subtitle: '',
+        children: [Center(child: Text('Could not load settings.', style: TextStyle(color: Theme.of(context).colorScheme.error)))],
+      ),
+      data: (profile) {
+        final initials = profile.businessName.isNotEmpty
+            ? profile.businessName.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
+            : 'ST';
+        return SproutPage(
+          title: 'Settings',
+          subtitle: 'Business profile, taxes, bank details, and notification controls.',
+          action: FilledButton.icon(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => _BusinessProfileDialog(profile: profile),
+            ),
+            icon: const Icon(Icons.edit_rounded, size: 18),
+            label: const Text('Edit profile'),
+          ),
       children: [
         // ── Business profile card ─────────────────────────────────────────────
         SproutCard(
@@ -74,7 +85,7 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          profile.email,
+                          profile.email ?? '',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
@@ -87,15 +98,15 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 20),
 
               // Contact details
-              _InfoRow(icon: Icons.phone_rounded,    value: profile.phone.isEmpty ? '—' : profile.phone),
+              _InfoRow(icon: Icons.phone_rounded,       value: profile.phone?.isEmpty ?? true   ? '—' : profile.phone!),
               const SizedBox(height: 8),
-              _InfoRow(icon: Icons.location_on_rounded, value: profile.address.isEmpty ? '—' : profile.address),
+              _InfoRow(icon: Icons.location_on_rounded, value: profile.address?.isEmpty ?? true ? '—' : profile.address!),
               const SizedBox(height: 24),
 
               // Payment accounts
               const SectionHeader(title: 'Payment accounts'),
               const SizedBox(height: 12),
-              if (profile.accounts.isEmpty)
+              if (profile.bankName == null)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
@@ -106,11 +117,11 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 )
               else
-                for (var i = 0; i < profile.accounts.length; i++) ...[
-                  if (i > 0)
-                    Divider(height: 16, color: scheme.outlineVariant.withValues(alpha: .4)),
-                  _BankAccountRow(profile.accounts[i]),
-                ],
+                _BankAccountRow(
+                  bankName:      profile.bankName!,
+                  accountName:   profile.accountName ?? '',
+                  accountNumber: profile.accountNumber ?? '',
+                ),
 
               const SizedBox(height: 24),
 
@@ -180,7 +191,9 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -215,8 +228,14 @@ class _InfoRow extends StatelessWidget {
 // ── Bank account row ───────────────────────────────────────────────────────────
 
 class _BankAccountRow extends StatelessWidget {
-  const _BankAccountRow(this.account);
-  final BankAccount account;
+  const _BankAccountRow({
+    required this.bankName,
+    required this.accountName,
+    required this.accountNumber,
+  });
+  final String bankName;
+  final String accountName;
+  final String accountNumber;
 
   @override
   Widget build(BuildContext context) {
@@ -237,9 +256,9 @@ class _BankAccountRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(account.bankName, style: Theme.of(context).textTheme.titleSmall),
+              Text(bankName, style: Theme.of(context).textTheme.titleSmall),
               Text(
-                account.accountName,
+                accountName,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -255,7 +274,7 @@ class _BankAccountRow extends StatelessWidget {
             border: Border.all(color: scheme.outlineVariant.withValues(alpha: .5)),
           ),
           child: Text(
-            account.accountNumber,
+            accountNumber,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w900,
                   fontFamily: 'monospace',
@@ -320,21 +339,20 @@ class _SettingsTile extends StatelessWidget {
 
 class _BusinessProfileDialog extends ConsumerStatefulWidget {
   const _BusinessProfileDialog({required this.profile});
-  final BusinessProfile profile;
+  final ApiBusinessProfile profile;
 
   @override
   ConsumerState<_BusinessProfileDialog> createState() => _BusinessProfileDialogState();
 }
 
 class _BusinessProfileDialogState extends ConsumerState<_BusinessProfileDialog> {
-  late final businessName = TextEditingController(text: widget.profile.businessName);
-  late final email        = TextEditingController(text: widget.profile.email);
-  late final phone        = TextEditingController(text: widget.profile.phone);
-  late final address      = TextEditingController(text: widget.profile.address);
-  BankAccount? get first => widget.profile.accounts.isEmpty ? null : widget.profile.accounts.first;
-  late final bankName     = TextEditingController(text: first?.bankName ?? '');
-  late final accountName  = TextEditingController(text: first?.accountName ?? '');
-  late final accountNumber = TextEditingController(text: first?.accountNumber ?? '');
+  late final businessName  = TextEditingController(text: widget.profile.businessName);
+  late final email         = TextEditingController(text: widget.profile.email ?? '');
+  late final phone         = TextEditingController(text: widget.profile.phone ?? '');
+  late final address       = TextEditingController(text: widget.profile.address ?? '');
+  late final bankName      = TextEditingController(text: widget.profile.bankName ?? '');
+  late final accountName   = TextEditingController(text: widget.profile.accountName ?? '');
+  late final accountNumber = TextEditingController(text: widget.profile.accountNumber ?? '');
 
   @override
   void dispose() {
@@ -383,23 +401,23 @@ class _BusinessProfileDialogState extends ConsumerState<_BusinessProfileDialog> 
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
-            ref.read(sproutStoreProvider.notifier).updateBusinessProfile(
-                  BusinessProfile(
-                    businessName: businessName.text,
-                    email: email.text,
-                    phone: phone.text,
-                    address: address.text,
-                    accounts: [
-                      BankAccount(
-                        bankName: bankName.text,
-                        accountName: accountName.text,
-                        accountNumber: accountNumber.text,
-                      ),
-                    ],
+          onPressed: () async {
+            await ref.read(settingsProvider.notifier).save(
+                  ApiBusinessProfile(
+                    businessName:  businessName.text,
+                    businessType:  widget.profile.businessType,
+                    email:         email.text.isEmpty ? null : email.text,
+                    phone:         phone.text.isEmpty ? null : phone.text,
+                    address:       address.text.isEmpty ? null : address.text,
+                    tin:           widget.profile.tin,
+                    rcNumber:      widget.profile.rcNumber,
+                    currency:      widget.profile.currency,
+                    bankName:      bankName.text.isEmpty ? null : bankName.text,
+                    accountName:   accountName.text.isEmpty ? null : accountName.text,
+                    accountNumber: accountNumber.text.isEmpty ? null : accountNumber.text,
                   ),
                 );
-            Navigator.pop(context);
+            if (context.mounted) Navigator.pop(context);
           },
           child: const Text('Save profile'),
         ),

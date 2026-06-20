@@ -13,6 +13,7 @@ class InvoiceCreate(BaseModel):
     customer_id: str
     invoice_date: Date
     due_date: Date
+    status: str = "DRAFT"  # DRAFT, QUOTATION, or PROFORMA
     items: list[InvoiceItemCreate] = Field(min_length=1)
     discount_type: str | None = None  # "PERCENT" or "FIXED"
     discount_value: float = 0
@@ -41,6 +42,11 @@ class RecordPaymentRequest(BaseModel):
     payment_method: str
     reference_number: str | None = None
     notes: str | None = None
+
+
+class SendInvoiceEmailRequest(BaseModel):
+    to_email: str | None = None
+    message: str | None = Field(default=None, max_length=1000)
 
 
 class InvoiceItemResponse(BaseModel):

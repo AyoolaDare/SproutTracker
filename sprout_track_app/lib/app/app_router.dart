@@ -7,11 +7,13 @@ import '../features/auth/forgot_password_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/reset_password_screen.dart';
 import '../features/auth/signup_screen.dart';
+import '../features/auth/verify_email_screen.dart';
 import '../features/customers/customers_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/expenses/expenses_screen.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/invoices/invoice_print_screen.dart';
+import '../features/invoices/invoice_verify_screen.dart';
 import '../features/invoices/invoices_screen.dart';
 import '../features/reports/reports_screen.dart';
 import '../features/settings/settings_screen.dart';
@@ -40,7 +42,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final auth = ref.read(authProvider);
       final loc = routerState.matchedLocation;
       final isOnLogin  = loc == '/login';
-      final isPublic   = loc == '/reset-password' || loc == '/signup' || loc == '/forgot-password';
+      final isPublic = loc == '/reset-password' ||
+          loc == '/verify-email' ||
+          loc.startsWith('/verify-invoice') ||
+          loc == '/signup' ||
+          loc == '/forgot-password';
 
       if (isPublic) return null;
       if (auth.status == AuthStatus.loading) return null;
@@ -77,6 +83,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state: state,
           child: ResetPasswordScreen(
             token: state.uri.queryParameters['token'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/verify-email',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: VerifyEmailScreen(
+            token: state.uri.queryParameters['token'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/verify-invoice/:id',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: InvoiceVerifyScreen(
+            invoiceId: state.pathParameters['id']!,
           ),
         ),
       ),

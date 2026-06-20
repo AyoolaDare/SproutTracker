@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
-import '../../core/state/sprout_state.dart';
+import '../../core/api/features/expenses_provider.dart';
 import '../../shared/formatters.dart';
 import '../../shared/widgets/sprout_card.dart';
 import '../../shared/widgets/sprout_page.dart';
@@ -12,9 +12,8 @@ class ExpensesScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final expenses = ref.watch(sproutStoreProvider).expenses;
-    final scheme   = Theme.of(context).colorScheme;
-    final total    = expenses.fold<num>(0, (s, e) => s + e.amount);
+    final expensesAsync = ref.watch(expensesProvider);
+    final scheme        = Theme.of(context).colorScheme;
 
     return SproutPage(
       title: 'Expenses',
@@ -28,122 +27,142 @@ class ExpensesScreen extends ConsumerWidget {
         label: const Text('Add expense'),
       ),
       children: [
-        // ── Summary bar ───────────────────────────────────────────────────────
-        if (expenses.isNotEmpty) ...[
-          SproutCard(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: AppTheme.terracotta.withValues(alpha: .12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.account_balance_wallet_rounded,
-                    color: AppTheme.terracotta,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Total spend', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
-                      Text(
-                        money(total),
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: AppTheme.terracotta,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  '${expenses.length} record${expenses.length == 1 ? '' : 's'}',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
+        expensesAsync.when(
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: CircularProgressIndicator(),
             ),
           ),
-          const SizedBox(height: 14),
-        ],
-
-        // ── Expense list ──────────────────────────────────────────────────────
-        SproutCard(
-          padding: EdgeInsets.zero,
-          child: expenses.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
-                    child: Column(
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text(
+                'Could not load expenses.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          ),
+          data: (expenses) {
+            final total = expenses.fold<double>(0, (s, e) => s + e.amount);
+            return Column(
+              children: [
+                if (expenses.isNotEmpty) ...[
+                  SproutCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Row(
                       children: [
-                        Icon(
-                          Icons.account_balance_wallet_rounded,
-                          size: 40,
-                          color: scheme.onSurfaceVariant.withValues(alpha: .35),
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: AppTheme.terracotta.withValues(alpha: .12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.account_balance_wallet_rounded,
+                            color: AppTheme.terracotta,
+                            size: 20,
+                          ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Total spend', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
+                              Text(
+                                money(total),
+                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      color: AppTheme.terracotta,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
                         Text(
-                          'No expenses recorded yet.',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          '${expenses.length} record${expenses.length == 1 ? '' : 's'}',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
                         ),
                       ],
                     ),
                   ),
-                )
-              : Column(
-                  children: [
-                    // Column headers
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest.withValues(alpha: .4),
-                        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                      ),
-                      child: Row(
-                        children: [
-                          const SizedBox(width: 42 + 14),
-                          Expanded(
-                            child: Text(
-                              'Description / Category',
-                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
+                  const SizedBox(height: 14),
+                ],
+                SproutCard(
+                  padding: EdgeInsets.zero,
+                  child: expenses.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.account_balance_wallet_rounded,
+                                  size: 40,
+                                  color: scheme.onSurfaceVariant.withValues(alpha: .35),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No expenses recorded yet.',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            'Amount',
-                            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                  color: scheme.onSurfaceVariant,
+                        )
+                      : Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest.withValues(alpha: .4),
+                                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const SizedBox(width: 42 + 14),
+                                  Expanded(
+                                    child: Text(
+                                      'Description / Category',
+                                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Amount',
+                                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            for (var i = 0; i < expenses.length; i++) ...[
+                              if (i > 0)
+                                Divider(
+                                  height: 1,
+                                  indent: 18,
+                                  endIndent: 18,
+                                  color: scheme.outlineVariant.withValues(alpha: .45),
                                 ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    for (var i = 0; i < expenses.length; i++) ...[
-                      if (i > 0)
-                        Divider(
-                          height: 1,
-                          indent: 18,
-                          endIndent: 18,
-                          color: scheme.outlineVariant.withValues(alpha: .45),
+                              _ExpenseRow(
+                                expense: expenses[i],
+                                onDelete: () => ref.read(expensesProvider.notifier).delete(expenses[i].id),
+                              ),
+                            ],
+                          ],
                         ),
-                      _ExpenseRow(
-                        expense: expenses[i],
-                        onDelete: () => ref.read(sproutStoreProvider.notifier).deleteExpense(expenses[i].id),
-                      ),
-                    ],
-                  ],
                 ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -154,7 +173,7 @@ class ExpensesScreen extends ConsumerWidget {
 
 class _ExpenseRow extends StatelessWidget {
   const _ExpenseRow({required this.expense, required this.onDelete});
-  final Expense      expense;
+  final ApiExpense   expense;
   final VoidCallback onDelete;
 
   @override
@@ -347,13 +366,13 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
-            ref.read(sproutStoreProvider.notifier).addExpense(
+          onPressed: () async {
+            await ref.read(expensesProvider.notifier).add(
                   description: description.text,
-                  category: category.text,
-                  amount: num.tryParse(amount.text) ?? 0,
+                  category:    category.text,
+                  amount:      double.tryParse(amount.text) ?? 0,
                 );
-            Navigator.pop(context);
+            if (context.mounted) Navigator.pop(context);
           },
           child: const Text('Record expense'),
         ),

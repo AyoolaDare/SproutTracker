@@ -143,6 +143,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (code == 403 && detail is Map<String, dynamic>) {
         if (detail['code'] == 'PASSWORD_SETUP_REQUIRED') {
           message = 'This migrated account needs a new password. Enter your email and use Forgot password to activate it.';
+        } else if (detail['code'] == 'EMAIL_VERIFICATION_REQUIRED') {
+          message = 'Verify your email before signing in. Check your inbox for the verification link.';
         }
       }
       if (mounted) {

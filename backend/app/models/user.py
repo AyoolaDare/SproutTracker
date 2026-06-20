@@ -32,6 +32,15 @@ class User(TimestampMixin, Base):
     password_reset_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    email_verification_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    oauth_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
     full_name: Mapped[str] = mapped_column(String(200))
     role: Mapped[UserRole] = mapped_column(
         SAEnum(UserRole), default=UserRole.OWNER
