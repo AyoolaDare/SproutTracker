@@ -60,7 +60,7 @@ class ApiInvoice {
       customerName:  j['customer_name'] as String? ?? (j['customer'] as Map<String, dynamic>?)?['name'] as String? ?? '',
       customerId:    j['customer_id'] as String? ?? '',
       totalAmount:   (j['total_amount'] as num? ?? 0).toDouble(),
-      amountPaid:    (j['amount_paid'] as num? ?? 0).toDouble(),
+      amountPaid:    ((j['amount_paid'] ?? j['paid_amount']) as num? ?? 0).toDouble(),
       status:        j['status'] as String? ?? 'DRAFT',
       paymentStatus: j['payment_status'] as String? ?? 'UNPAID',
       invoiceDate:   DateTime.tryParse(j['invoice_date'] as String? ?? '') ?? DateTime.now(),
@@ -158,6 +158,46 @@ class InvoicesNotifier extends AutoDisposeAsyncNotifier<List<ApiInvoice>> {
   Future<void> refresh() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(_load);
+  }
+
+  Future<ApiInvoice> create({
+    required String customerId,
+    required DateTime invoiceDate,
+    required DateTime dueDate,
+    required List<Map<String, dynamic>> items,
+    bool finalize = true,
+    bool applyVat = true,
+    bool applyWht = false,
+    String? notes,
+    String? terms,
+  }) async {
+    final res = await ref.read(apiClientProvider).post(
+      '/api/invoices',
+      data: {
+        'customer_id': customerId,
+        'invoice_date': invoiceDate.toIso8601String().split('T').first,
+        'due_date': dueDate.toIso8601String().split('T').first,
+        'status': 'DRAFT',
+        'items': items,
+        'apply_vat': applyVat,
+        'apply_wht': applyWht,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (terms != null && terms.isNotEmpty) 'terms': terms,
+      },
+    );
+    final body = res.data as Map<String, dynamic>;
+    var invoice = ApiInvoice.fromJson((body['data'] ?? body) as Map<String, dynamic>);
+    if (finalize) {
+      final finalized = await ref.read(apiClientProvider).post(
+        '/api/invoices/${invoice.id}/finalize',
+      );
+      final finalizedBody = finalized.data as Map<String, dynamic>;
+      invoice = ApiInvoice.fromJson(
+        (finalizedBody['data'] ?? finalizedBody) as Map<String, dynamic>,
+      );
+    }
+    await refresh();
+    return invoice;
   }
 
   Future<ApiInvoice?> getById(String id) async {

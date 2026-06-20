@@ -76,7 +76,8 @@ class CustomersNotifier extends AutoDisposeAsyncNotifier<List<ApiCustomer>> {
       '/api/customers',
       query: {'limit': 200},
     );
-    final items = (res.data['items'] ?? res.data['customers'] ?? res.data) as List;
+    final body = res.data as Map<String, dynamic>;
+    final items = (body['data'] ?? body['items'] ?? body['customers'] ?? []) as List;
     return items
         .map((e) => ApiCustomer.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -87,7 +88,7 @@ class CustomersNotifier extends AutoDisposeAsyncNotifier<List<ApiCustomer>> {
     state = await AsyncValue.guard(_load);
   }
 
-  Future<void> create({
+  Future<ApiCustomer> create({
     required String name,
     String? email,
     String? phone,
@@ -95,7 +96,7 @@ class CustomersNotifier extends AutoDisposeAsyncNotifier<List<ApiCustomer>> {
     String? address,
     bool isWhtApplicable = false,
   }) async {
-    await ref.read(apiClientProvider).post(
+    final res = await ref.read(apiClientProvider).post(
       '/api/customers',
       data: {
         'name':               name,
@@ -106,7 +107,9 @@ class CustomersNotifier extends AutoDisposeAsyncNotifier<List<ApiCustomer>> {
         'is_wht_applicable':  isWhtApplicable,
       },
     );
+    final customer = ApiCustomer.fromJson(res.data as Map<String, dynamic>);
     await refresh();
+    return customer;
   }
 }
 

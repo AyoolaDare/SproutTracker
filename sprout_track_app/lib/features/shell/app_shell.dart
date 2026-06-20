@@ -4,8 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/api/features/settings_provider.dart';
 import '../../core/auth/auth_provider.dart';
-import '../../core/state/sprout_state.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({required this.child, super.key});
@@ -26,7 +26,9 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Auth state — read unconditionally for Riverpod tracking
     final auth      = ref.watch(authProvider);
-    final profile   = ref.watch(sproutStoreProvider).businessProfile;
+    final profileAsync = ref.watch(settingsProvider);
+    final profile = profileAsync.valueOrNull ??
+        const ApiBusinessProfile(businessName: 'Sprout Track');
     final isMobile  = ResponsiveBreakpoints.of(context).isMobile;
     final location  = GoRouterState.of(context).uri.path;
     final activeIndex = _resolveIndex(location);
@@ -162,7 +164,7 @@ class _DesktopSidebar extends ConsumerWidget {
 
   final List<ShellDestination> destinations;
   final int                    activeIndex;
-  final BusinessProfile        profile;
+  final ApiBusinessProfile     profile;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

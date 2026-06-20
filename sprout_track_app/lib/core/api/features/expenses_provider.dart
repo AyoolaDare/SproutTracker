@@ -67,7 +67,8 @@ class ExpensesNotifier extends AutoDisposeAsyncNotifier<List<ApiExpense>> {
       '/api/expenses',
       query: {'limit': 200},
     );
-    final items = (res.data['items'] ?? res.data['expenses'] ?? res.data) as List;
+    final body = res.data as Map<String, dynamic>;
+    final items = (body['data'] ?? body['items'] ?? body['expenses'] ?? []) as List;
     return items
         .map((e) => ApiExpense.fromJson(e as Map<String, dynamic>))
         .toList();

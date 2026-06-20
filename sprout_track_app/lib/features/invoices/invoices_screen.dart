@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
-import '../../core/state/sprout_state.dart';
+import '../../core/api/features/customers_provider.dart';
+import '../../core/api/features/invoices_provider.dart';
+import '../../core/api/features/products_provider.dart';
 import '../../shared/formatters.dart';
 import '../../shared/widgets/sprout_card.dart';
 import '../../shared/widgets/sprout_page.dart';
@@ -21,14 +23,14 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state    = ref.watch(sproutStoreProvider);
+    final invoicesAsync = ref.watch(invoicesProvider);
     final scheme   = Theme.of(context).colorScheme;
-    final invoices = state.invoices.where((inv) {
+    final invoices = (invoicesAsync.valueOrNull ?? []).where((inv) {
       return switch (_filter) {
         _Filter.all     => true,
-        _Filter.pending => inv.derivedStatus == InvoiceStatus.pending,
-        _Filter.paid    => inv.derivedStatus == InvoiceStatus.paid,
-        _Filter.overdue => inv.derivedStatus == InvoiceStatus.overdue,
+        _Filter.pending => inv.displayStatus == 'pending' || inv.displayStatus == 'draft',
+        _Filter.paid    => inv.displayStatus == 'paid',
+        _Filter.overdue => inv.displayStatus == 'overdue',
       };
     }).toList();
 
@@ -75,7 +77,26 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
         const SizedBox(height: 12),
 
         // ── Invoice list ──────────────────────────────────────────────────────
-        SproutCard(
+        if (invoicesAsync.isLoading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (invoicesAsync.hasError)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text(
+                'Could not load invoices: ${invoicesAsync.error}',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.error),
+              ),
+            ),
+          )
+        else
+          SproutCard(
           padding: EdgeInsets.zero,
           child: invoices.isEmpty
               ? Padding(
@@ -148,7 +169,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 
 class _InvoiceRow extends ConsumerWidget {
   const _InvoiceRow({required this.invoice, required this.isLast});
-  final Invoice invoice;
+  final ApiInvoice invoice;
   final bool    isLast;
 
   @override
@@ -206,13 +227,13 @@ class _InvoiceRow extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      money(invoice.amount),
+                      money(invoice.totalAmount),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w900,
                           ),
                     ),
                     const SizedBox(height: 5),
-                    StatusPill(invoice.derivedStatus.label),
+                    StatusPill(invoice.displayStatus),
                   ],
                 ),
               ],
@@ -246,9 +267,9 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   final address      = TextEditingController();
   final quantity     = TextEditingController(text: '1');
   final unitPrice    = TextEditingController();
-  PaymentMethod paymentMethod = PaymentMethod.credit;
   bool   calculateVat    = false;
   String? selectedProductId;
+  bool isSaving = false;
 
   @override
   void dispose() {
@@ -262,8 +283,10 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final state   = ref.watch(sproutStoreProvider);
-    final product = state.inventory.where((e) => e.id == selectedProductId).firstOrNull;
+    final productsAsync = ref.watch(productsProvider);
+    final customers = ref.watch(customersProvider).valueOrNull ?? const <ApiCustomer>[];
+    final products = productsAsync.valueOrNull ?? const <ApiProduct>[];
+    final product = products.where((e) => e.id == selectedProductId).firstOrNull;
     final qty     = int.tryParse(quantity.text) ?? 0;
     final price   = num.tryParse(unitPrice.text) ?? 0;
     final subtotal = qty * price;
@@ -300,17 +323,17 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
               DropdownButtonFormField<String>(
                 initialValue: selectedProductId,
                 items: [
-                  for (final item in state.inventory)
+                  for (final item in products)
                     DropdownMenuItem(
                       value: item.id,
-                      child: Text('${item.name}  (${item.quantity} in stock)'),
+                      child: Text('${item.name}  (${item.currentStock} in stock)'),
                     ),
                 ],
                 onChanged: (value) {
-                  final selected = state.inventory.firstWhere((e) => e.id == value);
+                  final selected = products.firstWhere((e) => e.id == value);
                   setState(() {
                     selectedProductId = value;
-                    unitPrice.text = selected.unitCost.toString();
+                    unitPrice.text = selected.sellingPrice.toString();
                   });
                 },
                 decoration: const InputDecoration(labelText: 'Select product'),
@@ -336,16 +359,6 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<PaymentMethod>(
-                initialValue: paymentMethod,
-                items: [
-                  for (final method in PaymentMethod.values)
-                    DropdownMenuItem(value: method, child: Text(method.label)),
-                ],
-                onChanged: (v) => setState(() => paymentMethod = v ?? PaymentMethod.credit),
-                decoration: const InputDecoration(labelText: 'Payment method'),
               ),
               SwitchListTile(
                 value: calculateVat,
@@ -378,7 +391,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                 ),
               ),
 
-              if (product != null && qty > product.quantity) ...[
+              if (product != null && qty > product.currentStock) ...[
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -391,7 +404,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                       const Icon(Icons.warning_amber_rounded, color: AppTheme.terracotta, size: 16),
                       const SizedBox(width: 8),
                       Text(
-                        'Insufficient stock. Only ${product.quantity} units available.',
+                        'Insufficient stock. Only ${product.currentStock} units available.',
                         style: Theme.of(context).textTheme.labelMedium?.copyWith(color: AppTheme.terracotta),
                       ),
                     ],
@@ -405,33 +418,58 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: () {
+          onPressed: isSaving ? null : () async {
             try {
-              final selected = state.inventory.firstWhere((e) => e.id == selectedProductId);
-              final invoice = ref.read(sproutStoreProvider.notifier).createInvoice(
-                    customerName: customerName.text,
-                    phone: phone.text,
-                    address: address.text,
-                    paymentMethod: paymentMethod,
-                    calculateVat: calculateVat,
-                    lineItems: [
-                      InvoiceLineItem(
-                        productId: selected.id,
-                        name: selected.name,
-                        quantity: int.parse(quantity.text),
-                        unitPrice: num.parse(unitPrice.text),
-                      ),
+              setState(() => isSaving = true);
+              final selected = products.firstWhere((e) => e.id == selectedProductId);
+              final customerText = customerName.text.trim();
+              if (customerText.isEmpty) {
+                throw Exception('Customer name is required.');
+              }
+              final existingCustomer = customers
+                  .where((c) => c.name.trim().toLowerCase() == customerText.toLowerCase())
+                  .firstOrNull;
+              final customer = existingCustomer ??
+                  await ref.read(customersProvider.notifier).create(
+                        name: customerText,
+                        phone: phone.text.trim().isEmpty ? null : phone.text.trim(),
+                        address: address.text.trim().isEmpty ? null : address.text.trim(),
+                      );
+              final invoice = await ref.read(invoicesProvider.notifier).create(
+                    customerId: customer.id,
+                    invoiceDate: DateTime.now(),
+                    dueDate: DateTime.now().add(const Duration(days: 14)),
+                    applyVat: calculateVat,
+                    items: [
+                      {
+                        'product_id': selected.id,
+                        'description': selected.name,
+                        'quantity': int.parse(quantity.text),
+                        'unit_price': double.parse(unitPrice.text),
+                      },
                     ],
                   );
+              ref.invalidate(productsProvider);
+              ref.invalidate(customersProvider);
+              if (!context.mounted) return;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Invoice ${invoice.invoiceNumber} created.')),
               );
             } catch (e) {
+              if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+            } finally {
+              if (mounted) setState(() => isSaving = false);
             }
           },
-          child: const Text('Create invoice'),
+          child: isSaving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Create invoice'),
         ),
       ],
     );
@@ -442,11 +480,11 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
 
 class _InvoiceDetailsDialog extends ConsumerWidget {
   const _InvoiceDetailsDialog({required this.invoice});
-  final Invoice invoice;
+  final ApiInvoice invoice;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final latest            = ref.watch(sproutStoreProvider).invoices.firstWhere((e) => e.id == invoice.id);
+    final latest            = invoice;
     final paymentController = TextEditingController(text: latest.amountDue.toStringAsFixed(0));
     final scheme            = Theme.of(context).colorScheme;
 
@@ -455,12 +493,12 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
         children: [
           Expanded(
             child: Text(
-              latest.derivedStatus == InvoiceStatus.paid
+              latest.isPaid
                   ? 'Receipt ${latest.invoiceNumber}'
                   : 'Invoice ${latest.invoiceNumber}',
             ),
           ),
-          StatusPill(latest.derivedStatus.label),
+          StatusPill(latest.displayStatus),
         ],
       ),
       content: SizedBox(
@@ -475,7 +513,7 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
               ),
               Text(
-                latest.customerAddress,
+                latest.customerName,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 16),
@@ -509,7 +547,7 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         child: Row(
                           children: [
-                            Expanded(child: Text(latest.lineItems[i].name, style: Theme.of(context).textTheme.bodyMedium)),
+                            Expanded(child: Text(latest.lineItems[i].productName, style: Theme.of(context).textTheme.bodyMedium)),
                             Text('${latest.lineItems[i].quantity}'),
                             const SizedBox(width: 20),
                             SizedBox(width: 90, child: Text(money(latest.lineItems[i].lineTotal), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700))),
@@ -526,7 +564,7 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
               _AmountLine('Subtotal', latest.subtotal),
               _AmountLine('VAT (7.5%)', latest.vatAmount),
               Divider(height: 16, color: scheme.outlineVariant.withValues(alpha: .5)),
-              _AmountLine('Total', latest.amount, emphasized: true),
+              _AmountLine('Total', latest.totalAmount, emphasized: true),
               _AmountLine('Amount paid', latest.amountPaid),
               _AmountLine('Balance due', latest.amountDue, emphasized: latest.amountDue > 0),
               const SizedBox(height: 16),
@@ -544,7 +582,7 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '/receipts/verify/${latest.id}',
+                        '/verify-invoice/${latest.id}',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
                       ),
                     ),
@@ -568,11 +606,13 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
                     ),
                     const SizedBox(width: 10),
                     FilledButton(
-                      onPressed: () {
-                        ref.read(sproutStoreProvider.notifier).recordInvoicePayment(
-                              latest.id,
-                              num.parse(paymentController.text),
+                      onPressed: () async {
+                        await ref.read(invoicesProvider.notifier).recordPayment(
+                              invoiceId: latest.id,
+                              amount: double.parse(paymentController.text),
+                              method: 'BANK_TRANSFER',
                             );
+                        if (!context.mounted) return;
                         Navigator.pop(context);
                       },
                       child: const Text('Record'),
@@ -591,15 +631,16 @@ class _InvoiceDetailsDialog extends ConsumerWidget {
             context.go('/invoices/${latest.id}/print');
           },
           icon: const Icon(Icons.print_rounded, size: 16),
-          label: Text(latest.derivedStatus == InvoiceStatus.paid ? 'Print receipt' : 'Print invoice'),
+          label: Text(latest.isPaid ? 'Print receipt' : 'Print invoice'),
         ),
         TextButton(
-          onPressed: () {
-            ref.read(sproutStoreProvider.notifier).deleteInvoice(latest.id);
+          onPressed: () async {
+            await ref.read(invoicesProvider.notifier).voidInvoice(latest.id);
+            if (!context.mounted) return;
             Navigator.pop(context);
           },
           style: TextButton.styleFrom(foregroundColor: AppTheme.terracotta),
-          child: const Text('Delete'),
+          child: const Text('Void'),
         ),
         FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
       ],

@@ -398,34 +398,6 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
               const SizedBox(height: 12),
               const GoogleAuthButton(label: 'Continue with Google'),
               const SizedBox(height: 20),
-
-              // Demo divider
-              Row(
-                children: [
-                  const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'Demo access',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ),
-                  const Expanded(child: Divider()),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Demo login
-              OutlinedButton.icon(
-                onPressed: isLoading
-                    ? null
-                    : () => ref.read(authProvider.notifier).loginDemo(),
-                icon: const Icon(Icons.bolt_rounded, size: 18),
-                label: const Text('Continue with demo data'),
-              ),
-              const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
