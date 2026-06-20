@@ -1,6 +1,7 @@
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 class Settings(BaseSettings):
@@ -92,6 +93,15 @@ class Settings(BaseSettings):
         # asyncpg does not accept libpq-style sslmode query parameters.
         value = value.replace("?sslmode=require", "?ssl=require")
         value = value.replace("&sslmode=require", "&ssl=require")
+        # Supabase's transaction/session pooler can reuse backend connections across
+        # clients, so asyncpg prepared statement cache must be disabled explicitly.
+        if value.startswith("postgresql+asyncpg://"):
+            parts = urlsplit(value)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query.setdefault("prepared_statement_cache_size", "0")
+            value = urlunsplit(
+                (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+            )
         return value
 
     @field_validator("DEBUG", mode="before")
