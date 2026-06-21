@@ -1,3 +1,6 @@
 /api/* /api/:splat 200
+/login / 302
+/signup / 302
+/reset-password / 302
 / /index.html 200
 /* /verify.html 200
