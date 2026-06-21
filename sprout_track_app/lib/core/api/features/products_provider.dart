@@ -109,6 +109,7 @@ class ProductsNotifier extends AutoDisposeAsyncNotifier<List<ApiProduct>> {
       },
     );
     await refresh();
+    ref.invalidate(stockMovementsProvider);
   }
 
   Future<void> adjustStock({
@@ -127,6 +128,7 @@ class ProductsNotifier extends AutoDisposeAsyncNotifier<List<ApiProduct>> {
       },
     );
     await refresh();
+    ref.invalidate(stockMovementsProvider);
   }
 
   Future<void> deleteProduct(String id) async {
@@ -137,7 +139,7 @@ class ProductsNotifier extends AutoDisposeAsyncNotifier<List<ApiProduct>> {
     await refresh();
   }
 
-  Future<void> addProduct({
+  Future<ApiProduct> addProduct({
     required String name,
     required double sellingPrice,
     String? sku,
@@ -146,7 +148,7 @@ class ProductsNotifier extends AutoDisposeAsyncNotifier<List<ApiProduct>> {
     int reorderLevel = 0,
     bool trackInventory = true,
   }) async {
-    await ref.read(apiClientProvider).post(
+    final res = await ref.read(apiClientProvider).post(
       '/api/products',
       data: {
         'name':             name,
@@ -158,11 +160,87 @@ class ProductsNotifier extends AutoDisposeAsyncNotifier<List<ApiProduct>> {
         'track_inventory':  trackInventory,
       },
     );
+    final body = res.data as Map<String, dynamic>;
+    final product = ApiProduct.fromJson((body['data'] ?? body) as Map<String, dynamic>);
     await refresh();
+    return product;
   }
 }
 
 final productsProvider =
     AsyncNotifierProvider.autoDispose<ProductsNotifier, List<ApiProduct>>(
   ProductsNotifier.new,
+);
+
+// ── Stock movements ────────────────────────────────────────────────────────────
+
+class ApiStockMovement {
+  const ApiStockMovement({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.movementType,
+    required this.quantity,
+    required this.unitValue,
+    required this.totalValue,
+    this.referenceType,
+    this.notes,
+    required this.createdAt,
+  });
+
+  final String   id;
+  final String   productId;
+  final String   productName;
+  final String   movementType;
+  final int      quantity;
+  final double   unitValue;
+  final double   totalValue;
+  final String?  referenceType;
+  final String?  notes;
+  final DateTime createdAt;
+
+  bool get isIncoming => movementType == 'RECEIVE' || (movementType == 'ADJUST' && quantity > 0);
+
+  factory ApiStockMovement.fromJson(Map<String, dynamic> j) => ApiStockMovement(
+        id:            j['id'] as String? ?? '',
+        productId:     j['product_id'] as String? ?? '',
+        productName:   j['product_name'] as String? ?? '',
+        movementType:  j['movement_type'] as String? ?? '',
+        quantity:      (j['quantity'] as num? ?? 0).toInt(),
+        unitValue:     (j['unit_value'] as num? ?? 0).toDouble(),
+        totalValue:    (j['total_value'] as num? ?? 0).toDouble(),
+        referenceType: j['reference_type'] as String?,
+        notes:         j['notes'] as String?,
+        createdAt:     DateTime.tryParse(j['created_at'] as String? ?? '') ?? DateTime.now(),
+      );
+}
+
+class StockMovementsNotifier
+    extends AutoDisposeAsyncNotifier<List<ApiStockMovement>> {
+  @override
+  Future<List<ApiStockMovement>> build() => _load();
+
+  Future<List<ApiStockMovement>> _load() async {
+    final isDemo = ref.watch(authProvider).isDemo;
+    if (isDemo) return [];
+    final res = await ref.watch(apiClientProvider).get(
+      '/api/inventory/movements',
+      query: {'limit': 20},
+    );
+    final body = res.data as Map<String, dynamic>;
+    final items = (body['data'] ?? []) as List;
+    return items
+        .map((e) => ApiStockMovement.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(_load);
+  }
+}
+
+final stockMovementsProvider = AsyncNotifierProvider.autoDispose<
+    StockMovementsNotifier, List<ApiStockMovement>>(
+  StockMovementsNotifier.new,
 );

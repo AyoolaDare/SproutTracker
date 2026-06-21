@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/features/products_provider.dart';
-import '../../core/state/sprout_state.dart';
 import '../../shared/formatters.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/sprout_card.dart';
@@ -14,9 +13,9 @@ class InventoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final productsAsync   = ref.watch(productsProvider);
-    final historyEntries  = ref.watch(sproutStoreProvider).inventoryHistory;
-    final scheme          = Theme.of(context).colorScheme;
+    final productsAsync  = ref.watch(productsProvider);
+    final movementsAsync = ref.watch(stockMovementsProvider);
+    final scheme         = Theme.of(context).colorScheme;
 
     return SproutPage(
       title: 'Inventory',
@@ -93,24 +92,47 @@ class InventoryScreen extends ConsumerWidget {
             children: [
               const SectionHeader(title: 'Movement history'),
               const SizedBox(height: 14),
-              if (historyEntries.isEmpty)
-                Padding(
+              movementsAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+                error: (_, __) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Center(
                     child: Text(
-                      'No stock movements recorded yet.',
+                      'Could not load movement history.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
                     ),
                   ),
-                )
-              else
-                for (var i = 0; i < historyEntries.take(10).length; i++) ...[
-                  if (i > 0)
-                    Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: .4)),
-                  _HistoryRow(historyEntries.elementAt(i)),
-                ],
+                ),
+                data: (movements) => movements.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                          child: Text(
+                            'No stock movements recorded yet.',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          for (var i = 0; i < movements.take(10).length; i++) ...[
+                            if (i > 0)
+                              Divider(
+                                height: 1,
+                                color: scheme.outlineVariant.withValues(alpha: .4),
+                              ),
+                            _MovementRow(movements[i]),
+                          ],
+                        ],
+                      ),
+              ),
             ],
           ),
         ),
@@ -119,17 +141,24 @@ class InventoryScreen extends ConsumerWidget {
   }
 }
 
-// ── History row ────────────────────────────────────────────────────────────────
+// ── Movement row ───────────────────────────────────────────────────────────────
 
-class _HistoryRow extends StatelessWidget {
-  const _HistoryRow(this.entry);
-  final InventoryHistoryEntry entry;
+class _MovementRow extends StatelessWidget {
+  const _MovementRow(this.movement);
+  final ApiStockMovement movement;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isAdd  = entry.change > 0;
-    final color  = isAdd ? AppTheme.moss : AppTheme.terracotta;
+    final scheme    = Theme.of(context).colorScheme;
+    final isIncome  = movement.isIncoming;
+    final color     = isIncome ? AppTheme.moss : AppTheme.terracotta;
+    final typeLabel = switch (movement.movementType) {
+      'RECEIVE' => 'Received',
+      'SALE'    => 'Sale',
+      'ADJUST'  => 'Adjustment',
+      _         => movement.movementType,
+    };
+    final detail = movement.notes ?? movement.referenceType ?? typeLabel;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -143,7 +172,9 @@ class _HistoryRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              isAdd ? Icons.add_circle_outline_rounded : Icons.remove_circle_outline_rounded,
+              isIncome
+                  ? Icons.add_circle_outline_rounded
+                  : Icons.remove_circle_outline_rounded,
               size: 18,
               color: color,
             ),
@@ -154,13 +185,13 @@ class _HistoryRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry.itemName,
+                  movement.productName,
                   style: Theme.of(context).textTheme.titleSmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  '${entry.type} · ${shortDate(entry.date)} · ${entry.details}',
+                  '$typeLabel · ${shortDate(movement.createdAt)} · $detail',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -172,7 +203,7 @@ class _HistoryRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Text(
-            entry.change > 0 ? '+${entry.change}' : '${entry.change}',
+            isIncome ? '+${movement.quantity}' : '${movement.quantity}',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w900,
@@ -204,7 +235,6 @@ class _InventoryTile extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -242,15 +272,25 @@ class _InventoryTile extends ConsumerWidget {
           ),
           const SizedBox(height: 14),
 
-          // Stock health bar
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Stock level', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
-                  Text('${(stockHealth * 100).round()}%', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: tileColor, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Stock level',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  Text(
+                    '${(stockHealth * 100).round()}%',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: tileColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                 ],
               ),
               const SizedBox(height: 5),
@@ -267,7 +307,6 @@ class _InventoryTile extends ConsumerWidget {
           ),
           const SizedBox(height: 14),
 
-          // Stats row
           Row(
             children: [
               Expanded(child: _Stat(label: 'On hand', value: '${item.currentStock} units')),
@@ -276,7 +315,6 @@ class _InventoryTile extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // Actions
           Row(
             children: [
               Expanded(
@@ -357,14 +395,17 @@ class _AddProductDialogState extends ConsumerState<_AddProductDialog> {
   final sku          = TextEditingController();
   final category     = TextEditingController();
   final supplier     = TextEditingController();
+  final sellingPrice = TextEditingController(text: '0');
+  final openingQty   = TextEditingController(text: '0');
   final unitCost     = TextEditingController(text: '0');
-  final quantity     = TextEditingController(text: '0');
   final reorderLevel = TextEditingController(text: '0');
+  bool _loading = false;
 
   @override
   void dispose() {
     name.dispose(); sku.dispose(); category.dispose(); supplier.dispose();
-    unitCost.dispose(); quantity.dispose(); reorderLevel.dispose();
+    sellingPrice.dispose(); openingQty.dispose(); unitCost.dispose();
+    reorderLevel.dispose();
     super.dispose();
   }
 
@@ -379,33 +420,81 @@ class _AddProductDialogState extends ConsumerState<_AddProductDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: name,     decoration: const InputDecoration(labelText: 'Product name')),
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Product name'),
+              ),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: TextField(controller: sku,      decoration: const InputDecoration(labelText: 'SKU'))),
+                  Expanded(
+                    child: TextField(
+                      controller: sku,
+                      decoration: const InputDecoration(labelText: 'SKU (optional)'),
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: category, decoration: const InputDecoration(labelText: 'Category'))),
+                  Expanded(
+                    child: TextField(
+                      controller: category,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
-              TextField(controller: supplier, decoration: const InputDecoration(labelText: 'Supplier')),
+              TextField(
+                controller: supplier,
+                decoration: const InputDecoration(labelText: 'Supplier'),
+              ),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: TextField(controller: unitCost,     keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Unit cost (₦)'))),
+                  Expanded(
+                    child: TextField(
+                      controller: sellingPrice,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Selling price (₦)'),
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: quantity,     keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Opening qty'))),
+                  Expanded(
+                    child: TextField(
+                      controller: unitCost,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Cost price (₦)'),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
-              TextField(controller: reorderLevel, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Reorder level')),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: openingQty,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Opening qty'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: reorderLevel,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Reorder level'),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Alerts trigger when quantity falls to or below this level.',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+                  'Alerts trigger when quantity falls to or below reorder level.',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                 ),
               ),
             ],
@@ -413,20 +502,52 @@ class _AddProductDialogState extends ConsumerState<_AddProductDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: _loading ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
-          onPressed: () async {
-            await ref.read(productsProvider.notifier).addProduct(
-                  name: name.text,
-                  sku: sku.text.isEmpty ? null : sku.text,
-                  category: category.text.isEmpty ? null : category.text,
-                  supplier: supplier.text.isEmpty ? null : supplier.text,
-                  sellingPrice: double.tryParse(unitCost.text) ?? 0,
-                  reorderLevel: int.tryParse(reorderLevel.text) ?? 0,
-                );
-            if (context.mounted) Navigator.pop(context);
-          },
-          child: const Text('Add product'),
+          onPressed: _loading
+              ? null
+              : () async {
+                  if (name.text.trim().isEmpty) return;
+                  setState(() => _loading = true);
+                  try {
+                    final product = await ref.read(productsProvider.notifier).addProduct(
+                          name: name.text.trim(),
+                          sku: sku.text.isEmpty ? null : sku.text.trim(),
+                          category: category.text.isEmpty ? null : category.text.trim(),
+                          supplier: supplier.text.isEmpty ? null : supplier.text.trim(),
+                          sellingPrice: double.tryParse(sellingPrice.text) ?? 0,
+                          reorderLevel: int.tryParse(reorderLevel.text) ?? 0,
+                        );
+                    final qty  = int.tryParse(openingQty.text) ?? 0;
+                    final cost = double.tryParse(unitCost.text) ?? 0;
+                    if (qty > 0) {
+                      await ref.read(productsProvider.notifier).receiveStock(
+                            productId: product.id,
+                            quantity:  qty,
+                            unitCost:  cost > 0 ? cost : (double.tryParse(sellingPrice.text) ?? 0),
+                          );
+                    }
+                    if (context.mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(e.toString())),
+                      );
+                    }
+                  } finally {
+                    if (mounted) setState(() => _loading = false);
+                  }
+                },
+          child: _loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Add product'),
         ),
       ],
     );
@@ -464,13 +585,27 @@ class _AdjustStockDialogState extends ConsumerState<_AdjustStockDialog> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .4),
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: .4),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
-                Expanded(child: Text('Current stock', style: Theme.of(context).textTheme.bodyMedium)),
-                Text('${widget.item.currentStock} units', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+                Expanded(
+                  child: Text(
+                    'Current stock',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                Text(
+                  '${widget.item.currentStock} units',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
               ],
             ),
           ),
@@ -483,18 +618,24 @@ class _AdjustStockDialogState extends ConsumerState<_AdjustStockDialog> {
             ),
           ),
           const SizedBox(height: 10),
-          TextField(controller: reason, decoration: const InputDecoration(labelText: 'Reason')),
+          TextField(
+            controller: reason,
+            decoration: const InputDecoration(labelText: 'Reason'),
+          ),
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           onPressed: () async {
             try {
               await ref.read(productsProvider.notifier).adjustStock(
                     productId: widget.item.id,
-                    quantity: int.parse(adjustment.text),
-                    reason: reason.text,
+                    quantity:  int.parse(adjustment.text),
+                    reason:    reason.text,
                   );
               if (context.mounted) Navigator.pop(context);
             } catch (e) {
