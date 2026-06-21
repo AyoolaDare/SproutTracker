@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/features/products_provider.dart';
@@ -16,6 +17,7 @@ class InventoryScreen extends ConsumerWidget {
     final productsAsync  = ref.watch(productsProvider);
     final movementsAsync = ref.watch(stockMovementsProvider);
     final scheme         = Theme.of(context).colorScheme;
+    final isMobile       = ResponsiveBreakpoints.of(context).isMobile;
 
     return SproutPage(
       title: 'Inventory',
@@ -74,9 +76,9 @@ class InventoryScreen extends ConsumerWidget {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: products.length,
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 340,
-                    mainAxisExtent: 234,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: isMobile ? 520 : 340,
+                    mainAxisExtent: isMobile ? 268 : 234,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                   ),
@@ -229,9 +231,10 @@ class _InventoryTile extends ConsumerWidget {
         ? 1.0
         : (item.currentStock / (item.reorderLevel * 2)).clamp(0.0, 1.0);
     final scheme      = Theme.of(context).colorScheme;
+    final isMobile    = ResponsiveBreakpoints.of(context).isMobile;
 
     return SproutCard(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isMobile ? 14 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -307,12 +310,28 @@ class _InventoryTile extends ConsumerWidget {
           ),
           const SizedBox(height: 14),
 
-          Row(
-            children: [
-              Expanded(child: _Stat(label: 'On hand', value: '${item.currentStock} units')),
-              Expanded(child: _Stat(label: 'Value', value: compactMoney(item.stockValue))),
-              Expanded(child: _Stat(label: 'Margin', value: '${item.marginPercent.toStringAsFixed(1)}%')),
-            ],
+          LayoutBuilder(
+            builder: (context, box) {
+              final statWidth = isMobile ? (box.maxWidth - 8) / 2 : (box.maxWidth - 16) / 3;
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  SizedBox(
+                    width: statWidth,
+                    child: _Stat(label: 'On hand', value: '${item.currentStock} units'),
+                  ),
+                  SizedBox(
+                    width: statWidth,
+                    child: _Stat(label: 'Value', value: compactMoney(item.stockValue)),
+                  ),
+                  SizedBox(
+                    width: statWidth,
+                    child: _Stat(label: 'Margin', value: '${item.marginPercent.toStringAsFixed(1)}%'),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
 

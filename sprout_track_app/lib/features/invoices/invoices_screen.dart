@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/features/customers_provider.dart';
@@ -25,6 +26,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   Widget build(BuildContext context) {
     final invoicesAsync = ref.watch(invoicesProvider);
     final scheme   = Theme.of(context).colorScheme;
+    final isMobile = ResponsiveBreakpoints.of(context).isMobile;
     final invoices = (invoicesAsync.valueOrNull ?? []).where((inv) {
       return switch (_filter) {
         _Filter.all     => true,
@@ -126,6 +128,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
               : Column(
                   children: [
                     // Column headers
+                    if (!isMobile)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                       decoration: BoxDecoration(
@@ -175,6 +178,7 @@ class _InvoiceRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final isMobile = ResponsiveBreakpoints.of(context).isMobile;
 
     return Column(
       children: [
@@ -184,13 +188,16 @@ class _InvoiceRow extends ConsumerWidget {
             builder: (_) => _InvoiceDetailsDialog(invoice: invoice),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 14 : 18,
+              vertical: isMobile ? 13 : 14,
+            ),
             child: Row(
               children: [
                 // Icon container
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: isMobile ? 44 : 52,
+                  height: isMobile ? 44 : 52,
                   decoration: BoxDecoration(
                     color: scheme.primaryContainer.withValues(alpha: .7),
                     borderRadius: BorderRadius.circular(14),
@@ -208,6 +215,8 @@ class _InvoiceRow extends ConsumerWidget {
                     children: [
                       Text(
                         invoice.customerName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w800,
                             ),
@@ -222,18 +231,29 @@ class _InvoiceRow extends ConsumerWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: isMobile ? 8 : 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      money(invoice.totalAmount),
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: isMobile ? 92 : 132),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          money(invoice.totalAmount),
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                              ),
                           ),
-                    ),
+                        ),
+                      ),
                     const SizedBox(height: 5),
-                    StatusPill(invoice.displayStatus),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: StatusPill(invoice.displayStatus),
+                    ),
                   ],
                 ),
               ],
@@ -252,11 +272,7 @@ class _InvoiceRow extends ConsumerWidget {
   }
 }
 
-// ── Discount mode (mutually exclusive) ────────────────────────────────────────
-
-enum _DiscountMode { none, lineItem, invoiceLevel }
-
-// ── Per-line-item mutable state ────────────────────────────────────────────────
+// ── Line-item mutable state ────────────────────────────────────────────────────
 
 class _LineItemData {
   String? productId;
@@ -264,7 +280,9 @@ class _LineItemData {
   final TextEditingController qty   = TextEditingController(text: '1');
   final TextEditingController price = TextEditingController();
   final TextEditingController disc  = TextEditingController(text: '0');
-  bool discPct = true;
+  bool discPct     = true;
+  bool discEnabled = false;
+  bool vatEnabled  = false;
 
   double get grossAmt {
     final q = double.tryParse(qty.text) ?? 0;
@@ -273,11 +291,14 @@ class _LineItemData {
   }
 
   double get discountAmt {
+    if (!discEnabled) return 0;
     final d = double.tryParse(disc.text) ?? 0;
     return discPct ? grossAmt * d / 100 : d.clamp(0, grossAmt);
   }
 
-  double get netAmt => grossAmt - discountAmt;
+  double get netAmt    => grossAmt - discountAmt;
+  double get vatAmt    => vatEnabled ? netAmt * 0.075 : 0;
+  double get lineTotal => netAmt + vatAmt;
 
   void dispose() {
     desc.dispose();
@@ -307,16 +328,16 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   // Line items
   final List<_LineItemData> _lineItems = [_LineItemData()];
 
-  // Discount
-  _DiscountMode _discMode   = _DiscountMode.none;
-  bool          _invDiscPct = true;
-  final         _invDisc    = TextEditingController(text: '0');
-
-  // VAT
-  bool _applyVat   = false;
-  bool _vatPerLine = false;
+  // Invoice-level adjustments (mutually exclusive with per-line)
+  bool _invoiceDiscEnabled = false;
+  bool _invoiceDiscPct     = true;
+  final _invoiceDisc       = TextEditingController(text: '0');
+  bool _invoiceVatEnabled  = false;
 
   bool _saving = false;
+
+  bool get _anyLineDiscount => _lineItems.any((i) => i.discEnabled);
+  bool get _anyLineVat      => _lineItems.any((i) => i.vatEnabled);
 
   @override
   void dispose() {
@@ -326,47 +347,58 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
     _custName.dispose();
     _custPhone.dispose();
     _custEmail.dispose();
-    _invDisc.dispose();
+    _invoiceDisc.dispose();
     super.dispose();
   }
 
-  // ── Computed totals ───────────────────────────────────────────────────────────
+  // ── Totals ────────────────────────────────────────────────────────────────────
 
   double get _grossSubtotal => _lineItems.fold(0.0, (s, i) => s + i.grossAmt);
-
-  double get _totalLineDiscount =>
-      _discMode == _DiscountMode.lineItem
-          ? _lineItems.fold(0.0, (s, i) => s + i.discountAmt)
-          : 0;
+  double get _lineDiscTotal => _lineItems.fold(0.0, (s, i) => s + i.discountAmt);
+  double get _lineVatTotal  => _lineItems.fold(0.0, (s, i) => s + i.vatAmt);
+  double get _subtotalNet   => _lineItems.fold(0.0, (s, i) => s + i.netAmt);
 
   double get _invoiceDiscountAmt {
-    if (_discMode != _DiscountMode.invoiceLevel) return 0;
-    final d = double.tryParse(_invDisc.text) ?? 0;
-    return _invDiscPct
-        ? _grossSubtotal * d / 100
-        : d.clamp(0, _grossSubtotal);
+    if (!_invoiceDiscEnabled) return 0;
+    final d = double.tryParse(_invoiceDisc.text) ?? 0;
+    return _invoiceDiscPct ? _subtotalNet * d / 100 : d.clamp(0, _subtotalNet);
   }
 
-  double get _taxableAmt =>
-      _grossSubtotal - _totalLineDiscount - _invoiceDiscountAmt;
-
-  double get _vatAmt => _applyVat ? _taxableAmt * 0.075 : 0;
-
-  double get _grandTotal => _taxableAmt + _vatAmt;
+  double get _taxableAmt    => _subtotalNet - _invoiceDiscountAmt;
+  double get _invoiceVatAmt => _invoiceVatEnabled ? _taxableAmt * 0.075 : 0;
+  double get _grandTotal    => _taxableAmt + _lineVatTotal + _invoiceVatAmt;
 
   // ── Build ─────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final customers  = ref.watch(customersProvider).valueOrNull ?? const <ApiCustomer>[];
-    final products   = ref.watch(productsProvider).valueOrNull ?? const <ApiProduct>[];
-    final scheme     = Theme.of(context).colorScheme;
-    final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: scheme.onSurfaceVariant,
-        );
+    final customers = ref.watch(customersProvider).valueOrNull ?? const <ApiCustomer>[];
+    final products  = ref.watch(productsProvider).valueOrNull  ?? const <ApiProduct>[];
+    final scheme    = Theme.of(context).colorScheme;
 
     return AlertDialog(
-      title: const Text('Create invoice'),
+      titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      title: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppTheme.moss.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.receipt_long_rounded,
+              size: 18,
+              color: AppTheme.moss,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(child: Text('New Invoice')),
+        ],
+      ),
       content: SizedBox(
         width: 620,
         child: SingleChildScrollView(
@@ -374,12 +406,18 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Customer ──────────────────────────────────────────────────
-              Text('Customer', style: labelStyle),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
+
+              // ── CUSTOMER ─────────────────────────────────────────────────
+              _SectionLabel('CUSTOMER'),
+              const SizedBox(height: 10),
               if (!_newCust) ...[
                 DropdownButtonFormField<ApiCustomer>(
                   initialValue: _customer,
+                  decoration: const InputDecoration(
+                    labelText: 'Select customer',
+                    prefixIcon: Icon(Icons.person_outline_rounded, size: 18),
+                  ),
                   items: [
                     for (final c in customers)
                       DropdownMenuItem(
@@ -388,30 +426,30 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                       ),
                   ],
                   onChanged: (v) => setState(() => _customer = v),
-                  decoration: const InputDecoration(
-                    labelText: 'Select existing customer',
-                  ),
                 ),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => setState(() {
-                      _newCust  = true;
-                      _customer = null;
-                    }),
-                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
-                    label: const Text('Create new customer'),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _newCust  = true;
+                    _customer = null;
+                  }),
+                  child: const Text(
+                    '+ Create new customer',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.moss,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ] else ...[
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: .25),
+                    color: AppTheme.moss.withValues(alpha: .04),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: scheme.outlineVariant.withValues(alpha: .5),
+                      color: AppTheme.moss.withValues(alpha: .2),
                     ),
                   ),
                   child: Column(
@@ -419,7 +457,8 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                       TextField(
                         controller: _custName,
                         decoration: const InputDecoration(
-                          labelText: 'Customer name *',
+                          labelText: 'Full name *',
+                          prefixIcon: Icon(Icons.person_rounded, size: 18),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -431,6 +470,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                               keyboardType: TextInputType.phone,
                               decoration: const InputDecoration(
                                 labelText: 'Phone',
+                                prefixIcon: Icon(Icons.phone_outlined, size: 18),
                               ),
                             ),
                           ),
@@ -441,6 +481,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                               keyboardType: TextInputType.emailAddress,
                               decoration: const InputDecoration(
                                 labelText: 'Email',
+                                prefixIcon: Icon(Icons.email_outlined, size: 18),
                               ),
                             ),
                           ),
@@ -449,58 +490,35 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _newCust = false),
-                    icon: const Icon(Icons.arrow_back_rounded, size: 16),
-                    label: const Text('Select existing instead'),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => setState(() => _newCust = false),
+                  child: const Text(
+                    '← Back to customer list',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.moss,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
-              const SizedBox(height: 20),
 
-              // ── Discount type (mutually exclusive) ────────────────────────
-              Text('Discount', style: labelStyle),
-              const SizedBox(height: 8),
-              SegmentedButton<_DiscountMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: _DiscountMode.none,
-                    label: Text('None'),
-                  ),
-                  ButtonSegment(
-                    value: _DiscountMode.lineItem,
-                    label: Text('Per line item'),
-                  ),
-                  ButtonSegment(
-                    value: _DiscountMode.invoiceLevel,
-                    label: Text('Invoice total'),
-                  ),
-                ],
-                selected: {_discMode},
-                onSelectionChanged: (s) => setState(() => _discMode = s.first),
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
 
-              // ── Line items ────────────────────────────────────────────────
+              // ── LINE ITEMS ────────────────────────────────────────────────
               Row(
                 children: [
-                  Expanded(child: Text('Line items', style: labelStyle)),
-                  TextButton.icon(
-                    onPressed: () => setState(() => _lineItems.add(_LineItemData())),
-                    icon: const Icon(Icons.add_rounded, size: 16),
-                    label: const Text('Add item'),
+                  const Expanded(child: _SectionLabel('LINE ITEMS')),
+                  _ActionPill(
+                    label: '+ Add item',
+                    onTap: () => setState(() => _lineItems.add(_LineItemData())),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               for (var idx = 0; idx < _lineItems.length; idx++)
-                _buildLineItemCard(
+                _buildItemCard(
                   context: context,
                   idx: idx,
                   item: _lineItems[idx],
@@ -508,124 +526,11 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                   scheme: scheme,
                 ),
 
-              // ── Invoice-level discount input ───────────────────────────────
-              if (_discMode == _DiscountMode.invoiceLevel) ...[
-                const SizedBox(height: 4),
-                Text('Invoice discount', style: labelStyle),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _DiscToggle(
-                      isPercent: _invDiscPct,
-                      onToggle: (v) => setState(() => _invDiscPct = v),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _invDisc,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: _invDiscPct ? 'Discount (%)' : 'Discount (₦)',
-                        ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-              ],
+              const SizedBox(height: 4),
 
-              // ── VAT ───────────────────────────────────────────────────────
-              SwitchListTile(
-                value: _applyVat,
-                onChanged: (v) => setState(() => _applyVat = v),
-                title: Text(
-                  _applyVat
-                      ? 'VAT (7.5%) — ${money(_vatAmt)}'
-                      : 'Include VAT (7.5%)',
-                ),
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-              ),
-              if (_applyVat) ...[
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, bottom: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        'Charge VAT on:',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      ChoiceChip(
-                        label: const Text('Subtotal'),
-                        selected: !_vatPerLine,
-                        onSelected: (_) => setState(() => _vatPerLine = false),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      ChoiceChip(
-                        label: const Text('Per line item'),
-                        selected: _vatPerLine,
-                        onSelected: (_) => setState(() => _vatPerLine = true),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-
-              // ── Totals summary ────────────────────────────────────────────
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest.withValues(alpha: .4),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: scheme.outlineVariant.withValues(alpha: .5),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    _TotRow(
-                      label: 'Subtotal',
-                      value: money(_grossSubtotal),
-                    ),
-                    if (_discMode == _DiscountMode.lineItem &&
-                        _totalLineDiscount > 0)
-                      _TotRow(
-                        label: 'Line discounts',
-                        value: '−${money(_totalLineDiscount)}',
-                        dimColor: AppTheme.terracotta,
-                      ),
-                    if (_discMode == _DiscountMode.invoiceLevel &&
-                        _invoiceDiscountAmt > 0)
-                      _TotRow(
-                        label: 'Invoice discount',
-                        value: '−${money(_invoiceDiscountAmt)}',
-                        dimColor: AppTheme.terracotta,
-                      ),
-                    if ((_totalLineDiscount + _invoiceDiscountAmt) > 0)
-                      _TotRow(
-                        label: 'Taxable amount',
-                        value: money(_taxableAmt),
-                      ),
-                    if (_applyVat)
-                      _TotRow(
-                        label: 'VAT (7.5%)',
-                        value: money(_vatAmt),
-                      ),
-                    const Divider(height: 12),
-                    _TotRow(
-                      label: 'TOTAL',
-                      value: money(_grandTotal),
-                      emphasized: true,
-                    ),
-                  ],
-                ),
-              ),
+              // ── TOTALS CARD ───────────────────────────────────────────────
+              _buildTotalsCard(context: context, scheme: scheme),
+              const SizedBox(height: 8),
             ],
           ),
         ),
@@ -635,171 +540,576 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        const SizedBox(width: 4),
+        FilledButton.icon(
           onPressed: _saving ? null : _save,
-          child: _saving
+          icon: _saving
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
                 )
-              : const Text('Create invoice'),
+              : const Icon(Icons.check_rounded, size: 16),
+          label: const Text('Create invoice'),
         ),
       ],
     );
   }
 
-  Widget _buildLineItemCard({
+  // ── Line item card ─────────────────────────────────────────────────────────
+
+  Widget _buildItemCard({
     required BuildContext context,
     required int idx,
     required _LineItemData item,
     required List<ApiProduct> products,
     required ColorScheme scheme,
   }) {
-    final showDisc = _discMode == _DiscountMode.lineItem;
+    final isActive  = item.discEnabled || item.vatEnabled;
+    final canDisc   = !_invoiceDiscEnabled;
+    final canVat    = !_invoiceVatEnabled;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: .2),
-        borderRadius: BorderRadius.circular(12),
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: .4),
+          color: isActive
+              ? AppTheme.moss.withValues(alpha: .3)
+              : scheme.outlineVariant.withValues(alpha: .45),
+          width: isActive ? 1.5 : 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: .05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: item.productId,
-                  items: [
-                    for (final p in products)
-                      DropdownMenuItem(
-                        value: p.id,
-                        child: Text('${p.name}  (${p.currentStock} in stock)'),
+          // ── Product selector row ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: item.productId,
+                    decoration: InputDecoration(
+                      hintText: 'Select product (optional)',
+                      hintStyle: TextStyle(
+                        color: scheme.onSurfaceVariant.withValues(alpha: .5),
+                        fontSize: 13,
                       ),
-                  ],
-                  onChanged: (val) {
-                    final p = products.firstWhere((e) => e.id == val);
-                    setState(() {
-                      item.productId  = val;
-                      item.desc.text  = p.name;
-                      item.price.text = p.sellingPrice.toString();
-                    });
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Product (optional)',
-                    isDense: true,
+                      isDense: true,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                          color: AppTheme.moss.withValues(alpha: .5),
+                        ),
+                      ),
+                    ),
+                    items: [
+                      for (final p in products)
+                        DropdownMenuItem(
+                          value: p.id,
+                          child: Text(
+                            '${p.name}  ·  ${p.currentStock} in stock',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (val) {
+                      final p = products.firstWhere((e) => e.id == val);
+                      setState(() {
+                        item.productId  = val;
+                        item.desc.text  = p.name;
+                        item.price.text = p.sellingPrice.toStringAsFixed(0);
+                      });
+                    },
                   ),
                 ),
-              ),
-              if (_lineItems.length > 1) ...[
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: () {
-                    _lineItems[idx].dispose();
-                    setState(() => _lineItems.removeAt(idx));
-                  },
-                  icon: const Icon(Icons.remove_circle_outline_rounded),
-                  color: AppTheme.terracotta,
-                  iconSize: 20,
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
+                if (_lineItems.length > 1)
+                  IconButton(
+                    onPressed: () {
+                      _lineItems[idx].dispose();
+                      setState(() => _lineItems.removeAt(idx));
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    color: scheme.onSurfaceVariant.withValues(alpha: .5),
+                    tooltip: 'Remove',
+                    visualDensity: VisualDensity.compact,
+                  ),
               ],
-            ],
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: item.desc,
-            decoration: const InputDecoration(
-              labelText: 'Description',
-              isDense: true,
             ),
-            onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 68,
-                child: TextField(
-                  controller: item.qty,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+
+          // ── Description ─────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+            child: TextField(
+              controller: item.desc,
+              decoration: InputDecoration(
+                hintText: 'Item description',
+                hintStyle: TextStyle(
+                  color: scheme.onSurfaceVariant.withValues(alpha: .45),
+                  fontSize: 13,
+                ),
+                isDense: true,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(
+                    color: AppTheme.moss.withValues(alpha: .5),
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Qty',
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: item.price,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Unit price (₦)',
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-              if (showDisc) ...[
-                const SizedBox(width: 8),
-                _DiscToggle(
-                  isPercent: item.discPct,
-                  onToggle: (v) => setState(() => item.discPct = v),
-                  compact: true,
-                ),
-                const SizedBox(width: 6),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+
+          // ── Qty × Price ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Qty field
                 SizedBox(
-                  width: 76,
+                  width: 70,
                   child: TextField(
-                    controller: item.disc,
+                    controller: item.qty,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
+                    textAlign: TextAlign.center,
                     decoration: InputDecoration(
-                      labelText: item.discPct ? 'Disc %' : 'Disc ₦',
+                      labelText: 'Qty',
                       isDense: true,
+                      filled: true,
+                      fillColor: scheme.surfaceContainerHighest.withValues(alpha: .5),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.moss.withValues(alpha: .5),
+                        ),
+                      ),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
-              ],
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 90,
-                child: Column(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    '×',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: scheme.onSurfaceVariant.withValues(alpha: .5),
+                    ),
+                  ),
+                ),
+                // Price field
+                Expanded(
+                  child: TextField(
+                    controller: item.price,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Unit price',
+                      prefixText: '₦ ',
+                      isDense: true,
+                      filled: true,
+                      fillColor: scheme.surfaceContainerHighest.withValues(alpha: .5),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.moss.withValues(alpha: .5),
+                        ),
+                      ),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Line total
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      money(item.netAmt),
-                      textAlign: TextAlign.right,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
+                      money(item.lineTotal),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.moss,
                           ),
                     ),
-                    if (showDisc && item.discountAmt > 0)
+                    if (item.discountAmt > 0)
                       Text(
                         '−${money(item.discountAmt)}',
-                        textAlign: TextAlign.right,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: AppTheme.terracotta,
                             ),
                       ),
+                    if (item.vatAmt > 0)
+                      Text(
+                        '+VAT ${money(item.vatAmt)}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: AppTheme.moss,
+                            ),
+                      ),
                   ],
                 ),
+              ],
+            ),
+          ),
+
+          // ── Discount input (visible when enabled) ───────────────────────
+          if (item.discEnabled) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              child: Row(
+                children: [
+                  _PillToggle(
+                    options: const ['%', '₦'],
+                    selectedIndex: item.discPct ? 0 : 1,
+                    onChanged: (i) => setState(() => item.discPct = i == 0),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: item.disc,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        labelText: item.discPct ? 'Discount %' : 'Discount ₦',
+                        isDense: true,
+                        filled: true,
+                        fillColor: AppTheme.terracotta.withValues(alpha: .06),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: AppTheme.terracotta.withValues(alpha: .3),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: AppTheme.terracotta.withValues(alpha: .3),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: AppTheme.terracotta),
+                        ),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  if (item.discountAmt > 0) ...[
+                    const SizedBox(width: 10),
+                    Text(
+                      'saves ${money(item.discountAmt)}',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppTheme.terracotta,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
+          // ── Action buttons: Discount + VAT ──────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Row(
+              children: [
+                if (canDisc)
+                  _ToggleBtn(
+                    label: item.discEnabled ? 'Discount on' : '+ Discount',
+                    active: item.discEnabled,
+                    color: AppTheme.terracotta,
+                    icon: item.discEnabled
+                        ? Icons.discount_rounded
+                        : Icons.discount_outlined,
+                    onTap: () => setState(() {
+                      item.discEnabled = !item.discEnabled;
+                      if (!item.discEnabled) item.disc.text = '0';
+                    }),
+                  ),
+                if (canDisc) const SizedBox(width: 8),
+                if (canVat)
+                  _ToggleBtn(
+                    label: item.vatEnabled ? 'VAT 7.5% on' : '+ VAT 7.5%',
+                    active: item.vatEnabled,
+                    color: AppTheme.moss,
+                    icon: item.vatEnabled
+                        ? Icons.receipt_rounded
+                        : Icons.receipt_outlined,
+                    onTap: () => setState(() => item.vatEnabled = !item.vatEnabled),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Totals card ────────────────────────────────────────────────────────────
+
+  Widget _buildTotalsCard({
+    required BuildContext context,
+    required ColorScheme scheme,
+  }) {
+    final hasAnyDisc = _anyLineDiscount || _invoiceDiscEnabled;
+    final hasAnyVat  = _anyLineVat || _invoiceVatEnabled;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.moss.withValues(alpha: .04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.moss.withValues(alpha: .2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Subtotal
+          _SummaryRow(
+            label: 'Subtotal',
+            value: money(_grossSubtotal),
+          ),
+
+          // Line discount summary
+          if (_lineDiscTotal > 0) ...[
+            const SizedBox(height: 2),
+            _SummaryRow(
+              label: 'Line discounts',
+              value: '−${money(_lineDiscTotal)}',
+              valueColor: AppTheme.terracotta,
+            ),
+            _SummaryRow(
+              label: 'After discounts',
+              value: money(_subtotalNet),
+            ),
+          ],
+
+          // Invoice-level discount input
+          if (_invoiceDiscEnabled) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text(
+                  'Invoice discount',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.terracotta,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const Spacer(),
+                _PillToggle(
+                  options: const ['%', '₦'],
+                  selectedIndex: _invoiceDiscPct ? 0 : 1,
+                  onChanged: (i) => setState(() => _invoiceDiscPct = i == 0),
+                  compact: true,
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: TextField(
+                    controller: _invoiceDisc,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppTheme.terracotta.withValues(alpha: .06),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.terracotta.withValues(alpha: .3),
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.terracotta.withValues(alpha: .3),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: AppTheme.terracotta),
+                      ),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                if (_invoiceDiscountAmt > 0) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '−${money(_invoiceDiscountAmt)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.terracotta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ],
+            ),
+            if (_invoiceDiscountAmt > 0) ...[
+              const SizedBox(height: 4),
+              _SummaryRow(
+                label: 'Taxable amount',
+                value: money(_taxableAmt),
+              ),
+            ],
+          ],
+
+          // Line-level VAT total
+          if (_lineVatTotal > 0) ...[
+            const SizedBox(height: 2),
+            _SummaryRow(
+              label: 'VAT (7.5% per line)',
+              value: '+${money(_lineVatTotal)}',
+              valueColor: AppTheme.moss,
+            ),
+          ],
+
+          // Invoice-level VAT
+          if (_invoiceVatEnabled) ...[
+            const SizedBox(height: 2),
+            _SummaryRow(
+              label: 'VAT (7.5% on subtotal)',
+              value: '+${money(_invoiceVatAmt)}',
+              valueColor: AppTheme.moss,
+            ),
+          ],
+
+          // ── Action buttons ─────────────────────────────────────────────
+          if (!hasAnyDisc || !hasAnyVat) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                if (!hasAnyDisc)
+                  _ToggleBtn(
+                    label: '+ Invoice discount',
+                    active: false,
+                    color: AppTheme.terracotta,
+                    icon: Icons.discount_outlined,
+                    onTap: () => setState(() => _invoiceDiscEnabled = true),
+                  ),
+                if (!hasAnyDisc && !hasAnyVat) const SizedBox(width: 8),
+                if (!hasAnyVat)
+                  _ToggleBtn(
+                    label: '+ VAT 7.5%',
+                    active: false,
+                    color: AppTheme.moss,
+                    icon: Icons.receipt_outlined,
+                    onTap: () => setState(() => _invoiceVatEnabled = true),
+                  ),
+              ],
+            ),
+          ],
+
+          // Remove links for active invoice-level options
+          if (_invoiceDiscEnabled || _invoiceVatEnabled) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (_invoiceDiscEnabled)
+                  GestureDetector(
+                    onTap: () => setState(() {
+                      _invoiceDiscEnabled = false;
+                      _invoiceDisc.text   = '0';
+                    }),
+                    child: const Text(
+                      '× Remove discount',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.terracotta,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (_invoiceDiscEnabled && _invoiceVatEnabled)
+                  const SizedBox(width: 16),
+                if (_invoiceVatEnabled)
+                  GestureDetector(
+                    onTap: () => setState(() => _invoiceVatEnabled = false),
+                    child: const Text(
+                      '× Remove VAT',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.terracotta,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+
+          // ── Grand Total ────────────────────────────────────────────────
+          const SizedBox(height: 14),
+          Divider(
+            color: AppTheme.moss.withValues(alpha: .2),
+            height: 1,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text(
+                'TOTAL',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.moss,
+                      letterSpacing: 0.8,
+                    ),
+              ),
+              const Spacer(),
+              Text(
+                money(_grandTotal),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.moss,
+                    ),
               ),
             ],
           ),
@@ -807,6 +1117,8 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
       ),
     );
   }
+
+  // ── Save ──────────────────────────────────────────────────────────────────
 
   Future<void> _save() async {
     setState(() => _saving = true);
@@ -842,7 +1154,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
             'quantity':    double.tryParse(item.qty.text) ?? 1,
             'unit_price':  double.tryParse(item.price.text) ?? 0,
             if (item.productId != null) 'product_id': item.productId,
-            if (_discMode == _DiscountMode.lineItem) ...{
+            if (item.discEnabled) ...{
               'discount_amount': item.discountAmt,
               'discount_type':   item.discPct ? 'percent' : 'fixed',
             },
@@ -855,7 +1167,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
             customerId:  customer.id,
             invoiceDate: DateTime.now(),
             dueDate:     DateTime.now().add(const Duration(days: 14)),
-            applyVat:    _applyVat,
+            applyVat:    _invoiceVatEnabled || _anyLineVat,
             items:       apiItems,
             notes: invDiscount > 0
                 ? 'Invoice discount: ${money(invDiscount)}'
@@ -881,74 +1193,195 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   }
 }
 
-// ── Discount type toggle (% ↔ ₦) ──────────────────────────────────────────────
+// ── Section label ──────────────────────────────────────────────────────────────
 
-class _DiscToggle extends StatelessWidget {
-  const _DiscToggle({
-    required this.isPercent,
-    required this.onToggle,
-    this.compact = false,
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: const TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.moss,
+          letterSpacing: 1.4,
+        ),
+      );
+}
+
+// ── Pill link button (e.g. "+ Add item") ──────────────────────────────────────
+
+class _ActionPill extends StatelessWidget {
+  const _ActionPill({required this.label, required this.onTap});
+  final String        label;
+  final VoidCallback  onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppTheme.moss.withValues(alpha: .1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.moss.withValues(alpha: .3)),
+          ),
+          child: const Text(
+            '+ Add item',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.moss,
+            ),
+          ),
+        ),
+      );
+}
+
+// ── Toggle action button (outline pill that fills when active) ─────────────────
+
+class _ToggleBtn extends StatelessWidget {
+  const _ToggleBtn({
+    required this.label,
+    required this.active,
+    required this.color,
+    required this.icon,
+    required this.onTap,
   });
 
-  final bool isPercent;
-  final void Function(bool) onToggle;
-  final bool compact;
+  final String    label;
+  final bool      active;
+  final Color     color;
+  final IconData  icon;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final outlineColor = active ? color.withValues(alpha: .5) : Theme.of(context).colorScheme.outlineVariant;
+    final textColor    = active ? color : Theme.of(context).colorScheme.onSurfaceVariant;
     return GestureDetector(
-      onTap: () => onToggle(!isPercent),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 10,
-          vertical: compact ? 5 : 7,
-        ),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTheme.moss.withValues(alpha: .12),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppTheme.moss.withValues(alpha: .3)),
+          color: active ? color.withValues(alpha: .1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: outlineColor),
         ),
-        child: Text(
-          isPercent ? '%' : '₦',
-          style: TextStyle(
-            fontSize: compact ? 12 : 13,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.moss,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: textColor),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-// ── Invoice totals row ─────────────────────────────────────────────────────────
+// ── % / ₦ pill toggle ─────────────────────────────────────────────────────────
 
-class _TotRow extends StatelessWidget {
-  const _TotRow({
+class _PillToggle extends StatelessWidget {
+  const _PillToggle({
+    required this.options,
+    required this.selectedIndex,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  final List<String>       options;
+  final int                selectedIndex;
+  final void Function(int) onChanged;
+  final bool               compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: .6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < options.length; i++)
+            GestureDetector(
+              onTap: () => onChanged(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 7 : 9,
+                  vertical: compact ? 2 : 4,
+                ),
+                decoration: BoxDecoration(
+                  color: i == selectedIndex ? AppTheme.moss : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  options[i],
+                  style: TextStyle(
+                    fontSize: compact ? 11 : 12,
+                    fontWeight: FontWeight.w700,
+                    color: i == selectedIndex ? Colors.white : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Totals summary row ─────────────────────────────────────────────────────────
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
     required this.label,
     required this.value,
-    this.emphasized = false,
-    this.dimColor,
+    this.valueColor,
   });
 
   final String label;
   final String value;
-  final bool   emphasized;
-  final Color? dimColor;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
-          fontWeight: emphasized ? FontWeight.w900 : FontWeight.w500,
-          fontSize:   emphasized ? 15 : null,
-          color:      dimColor,
-        );
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Expanded(child: Text(label, style: style)),
-          Text(value, style: style),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: valueColor,
+                ),
+          ),
         ],
       ),
     );

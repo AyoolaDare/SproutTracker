@@ -59,18 +59,18 @@ class AppTheme {
           displayMedium:  display.displayMedium?.copyWith(fontSize: 44, height: 1.0,  fontWeight: FontWeight.w800),
           displaySmall:   display.displaySmall?.copyWith(fontSize: 34,  height: 1.04, fontWeight: FontWeight.w800),
           headlineLarge:  display.headlineLarge?.copyWith(fontSize: 30,  height: 1.06, fontWeight: FontWeight.w800),
-          headlineMedium: display.headlineMedium?.copyWith(fontSize: 24, height: 1.1,  fontWeight: FontWeight.w800),
-          headlineSmall:  display.headlineSmall?.copyWith(fontSize: 20,  height: 1.15, fontWeight: FontWeight.w800),
+          headlineMedium: display.headlineMedium?.copyWith(fontSize: 23, height: 1.1,  fontWeight: FontWeight.w800),
+          headlineSmall:  display.headlineSmall?.copyWith(fontSize: 19,  height: 1.15, fontWeight: FontWeight.w800),
           // Epilogue for titles / body / labels
-          titleLarge:  body.titleLarge?.copyWith(fontSize: 17,   height: 1.25, fontWeight: FontWeight.w800),
+          titleLarge:  body.titleLarge?.copyWith(fontSize: 16,   height: 1.25, fontWeight: FontWeight.w800),
           titleMedium: body.titleMedium?.copyWith(fontSize: 15,   height: 1.3,  fontWeight: FontWeight.w700),
           titleSmall:  body.titleSmall?.copyWith(fontSize: 13,   height: 1.25, fontWeight: FontWeight.w700),
           bodyLarge:   body.bodyLarge?.copyWith(fontSize: 15,   height: 1.55),
-          bodyMedium:  body.bodyMedium?.copyWith(fontSize: 13.5, height: 1.55),
+          bodyMedium:  body.bodyMedium?.copyWith(fontSize: 13, height: 1.5),
           bodySmall:   body.bodySmall?.copyWith(fontSize: 12,   height: 1.4),
-          labelLarge:  body.labelLarge?.copyWith(fontSize: 12.5, height: 1.1,  fontWeight: FontWeight.w700, letterSpacing: .2),
+          labelLarge:  body.labelLarge?.copyWith(fontSize: 12.5, height: 1.15,  fontWeight: FontWeight.w700),
           labelMedium: body.labelMedium?.copyWith(fontSize: 11.5, height: 1.1, fontWeight: FontWeight.w600),
-          labelSmall:  body.labelSmall?.copyWith(fontSize: 10.5, height: 1.1,  fontWeight: FontWeight.w600, letterSpacing: .3),
+          labelSmall:  body.labelSmall?.copyWith(fontSize: 10.5, height: 1.15,  fontWeight: FontWeight.w600),
         )
         .apply(bodyColor: scheme.onSurface, displayColor: scheme.onSurface);
 
@@ -95,14 +95,16 @@ class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          minimumSize: const Size(48, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           textStyle: GoogleFonts.epilogue(fontSize: 13.5, fontWeight: FontWeight.w700, letterSpacing: .2),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          minimumSize: const Size(48, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           textStyle: GoogleFonts.epilogue(fontSize: 13.5, fontWeight: FontWeight.w700, letterSpacing: .2),
         ),
       ),

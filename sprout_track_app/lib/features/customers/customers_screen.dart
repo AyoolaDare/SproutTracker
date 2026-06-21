@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:responsive_framework/responsive_framework.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/features/customers_provider.dart';
@@ -14,6 +15,7 @@ class CustomersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final customersAsync = ref.watch(customersProvider);
     final scheme         = Theme.of(context).colorScheme;
+    final isMobile       = ResponsiveBreakpoints.of(context).isMobile;
 
     return SproutPage(
       title: 'Customers',
@@ -62,6 +64,7 @@ class CustomersScreen extends ConsumerWidget {
                   )
                 : Column(
                     children: [
+                      if (!isMobile)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                         decoration: BoxDecoration(
@@ -114,6 +117,7 @@ class _CustomerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme  = Theme.of(context).colorScheme;
+    final isMobile = ResponsiveBreakpoints.of(context).isMobile;
     final initials = customer.name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase();
     final hasDebt  = customer.outstandingBalance > 0;
 
@@ -128,7 +132,10 @@ class _CustomerRow extends StatelessWidget {
     final avatarColor = avatarColors[customer.name.length % avatarColors.length];
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 14 : 18,
+        vertical: isMobile ? 13 : 14,
+      ),
       child: Row(
         children: [
           // Avatar
@@ -150,7 +157,7 @@ class _CustomerRow extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: isMobile ? 12 : 14),
 
           // Name + contact
           Expanded(
@@ -159,6 +166,8 @@ class _CustomerRow extends StatelessWidget {
               children: [
                 Text(
                   customer.name,
+                  maxLines: isMobile ? 2 : 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -174,17 +183,24 @@ class _CustomerRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: isMobile ? 8 : 12),
 
           // Financial summary
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                money(customer.totalRevenue),
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: isMobile ? 92 : 130),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    money(customer.totalRevenue),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
                     ),
+                  ),
               ),
               const SizedBox(height: 4),
               if (hasDebt)

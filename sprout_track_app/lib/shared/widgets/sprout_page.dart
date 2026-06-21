@@ -22,11 +22,19 @@ class SproutPage extends StatelessWidget {
     final bp              = ResponsiveBreakpoints.of(context);
     final isMobile        = bp.isMobile;
     final isTablet        = bp.isTablet;
-    final hPad            = isMobile ? 16.0 : (isTablet ? 22.0 : 30.0);
+    final hPad            = isMobile ? 14.0 : (isTablet ? 22.0 : 30.0);
     final scheme          = Theme.of(context).colorScheme;
+    final titleStyle      = (isMobile
+            ? Theme.of(context).textTheme.headlineSmall
+            : Theme.of(context).textTheme.headlineLarge)
+        ?.copyWith(fontWeight: FontWeight.w900);
+    final subtitleStyle   = (isMobile
+            ? Theme.of(context).textTheme.bodySmall
+            : Theme.of(context).textTheme.bodyLarge)
+        ?.copyWith(color: scheme.onSurfaceVariant, height: 1.35);
 
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(hPad, isMobile ? 16 : 26, hPad, 36),
+      padding: EdgeInsets.fromLTRB(hPad, isMobile ? 12 : 26, hPad, 36),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1200),
@@ -34,47 +42,51 @@ class SproutPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Page header ────────────────────────────────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Accent bar above title
-                        Container(
-                          width: 32,
-                          height: 3,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.moss,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                        Text(
-                          title,
-                          style: (isMobile
-                                  ? Theme.of(context).textTheme.headlineMedium
-                                  : Theme.of(context).textTheme.headlineLarge)
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          subtitle,
-                          style: (isMobile
-                                  ? Theme.of(context).textTheme.bodyMedium
-                                  : Theme.of(context).textTheme.bodyLarge)
-                              ?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
+              if (isMobile)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _AccentBar(),
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: titleStyle,
                     ),
-                  ),
-                  if (action != null) ...[
-                    const SizedBox(width: 16),
-                    action!,
+                    const SizedBox(height: 5),
+                    Text(
+                      subtitle,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: subtitleStyle,
+                    ),
+                    if (action != null) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(width: double.infinity, child: action!),
+                    ],
                   ],
-                ],
-              ),
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _AccentBar(),
+                          Text(title, style: titleStyle),
+                          const SizedBox(height: 6),
+                          Text(subtitle, style: subtitleStyle),
+                        ],
+                      ),
+                    ),
+                    if (action != null) ...[
+                      const SizedBox(width: 16),
+                      action!,
+                    ],
+                  ],
+                ),
               SizedBox(height: isMobile ? 18 : 24),
 
               // ── Page body ──────────────────────────────────────────────────
@@ -82,6 +94,21 @@ class SproutPage extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AccentBar extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      height: 3,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.moss,
+        borderRadius: BorderRadius.circular(2),
       ),
     );
   }

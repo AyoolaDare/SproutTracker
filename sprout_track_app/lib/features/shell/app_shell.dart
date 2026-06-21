@@ -45,10 +45,49 @@ class AppShell extends ConsumerWidget {
           title: const _BrandLockup(compact: true),
           surfaceTintColor: Colors.transparent,
           actions: [
-            IconButton(
-              tooltip: 'Search',
-              onPressed: () {},
-              icon: const Icon(Icons.search_rounded),
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: (value) {
+                switch (value) {
+                  case 'reports':
+                    context.go('/reports');
+                    break;
+                  case 'settings':
+                    context.go('/settings');
+                    break;
+                  case 'logout':
+                    ref.read(authProvider.notifier).logout();
+                    break;
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'reports',
+                  child: ListTile(
+                    leading: Icon(Icons.query_stats_rounded),
+                    title: Text('Reports'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'settings',
+                  child: ListTile(
+                    leading: Icon(Icons.tune_rounded),
+                    title: Text('Settings'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'logout',
+                  child: ListTile(
+                    leading: Icon(Icons.logout_rounded),
+                    title: Text('Sign out'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: 8),
           ],

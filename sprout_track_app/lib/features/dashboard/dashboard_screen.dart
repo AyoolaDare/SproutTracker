@@ -23,7 +23,7 @@ class DashboardScreen extends ConsumerWidget {
     final metricsAsync = ref.watch(dashboardProvider);
     final bp           = ResponsiveBreakpoints.of(context);
     final isMobile     = bp.isMobile;
-    final metricCols   = isMobile ? 2 : (bp.isTablet ? 2 : 4);
+    final metricCols   = isMobile ? 1 : (bp.isTablet ? 2 : 4);
 
     return SproutPage(
       title: 'Business overview',
@@ -92,7 +92,7 @@ class DashboardScreen extends ConsumerWidget {
                     crossAxisCount: metricCols,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
-                    mainAxisExtent: isMobile ? 110 : 124,
+                    mainAxisExtent: isMobile ? 96 : 124,
                   ),
                   itemBuilder: (context, i) => _MetricTile(metrics[i]),
                 ),
@@ -136,74 +136,129 @@ class _BusinessHealthCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isMobile = ResponsiveBreakpoints.of(context).isMobile;
     final color = score >= 80
         ? AppTheme.moss
         : (score >= 60 ? AppTheme.ochre : AppTheme.terracotta);
+    final gaugeSize = isMobile ? 82.0 : 96.0;
 
     return SproutCard(
-      child: SizedBox(
-        height: 168,
-        child: Row(
-          children: [
-            SizedBox(
-              width: 96,
-              height: 96,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CircularProgressIndicator(
-                    value: score.clamp(0, 100) / 100,
-                    strokeWidth: 9,
-                    backgroundColor: scheme.surfaceContainerHighest,
-                    color: color,
-                  ),
-                  Center(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        '$score',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: scheme.onSurface,
-                            ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: isMobile ? 132 : 168),
+        child: isMobile
+            ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Business health',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
+                  Row(
+                    children: [
+                      _HealthGauge(
+                        size: gaugeSize,
+                        score: score,
+                        color: color,
+                        backgroundColor: scheme.surfaceContainerHighest,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(child: _HealthSummary(score: score, summary: summary)),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    summary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          height: 1.25,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  StatusPill(score >= 80 ? 'Strong' : (score >= 60 ? 'Watch' : 'Action needed')),
                 ],
-              ),
+              )
+            : Row(
+          children: [
+            _HealthGauge(
+              size: gaugeSize,
+              score: score,
+              color: color,
+              backgroundColor: scheme.surfaceContainerHighest,
             ),
+            const SizedBox(width: 16),
+            Expanded(child: _HealthSummary(score: score, summary: summary)),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _HealthGauge extends StatelessWidget {
+  const _HealthGauge({
+    required this.size,
+    required this.score,
+    required this.color,
+    required this.backgroundColor,
+  });
+
+  final double size;
+  final int score;
+  final Color color;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CircularProgressIndicator(
+            value: score.clamp(0, 100) / 100,
+            strokeWidth: size <= 84 ? 7 : 9,
+            backgroundColor: backgroundColor,
+            color: color,
+          ),
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '$score',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HealthSummary extends StatelessWidget {
+  const _HealthSummary({required this.score, required this.summary});
+
+  final int score;
+  final String summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Business health',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          summary,
+          maxLines: ResponsiveBreakpoints.of(context).isMobile ? 3 : 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.25,
+              ),
+        ),
+        const SizedBox(height: 12),
+        StatusPill(score >= 80 ? 'Strong' : (score >= 60 ? 'Watch' : 'Action needed')),
+      ],
     );
   }
 }
@@ -215,17 +270,19 @@ class _CashPositionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isMobile = ResponsiveBreakpoints.of(context).isMobile;
     return SproutCard(
-      child: SizedBox(
-        height: 168,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: isMobile ? 144 : 168),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             SectionHeader(
               title: 'Cash position',
               trailing: Icon(Icons.account_balance_wallet_rounded, color: AppTheme.moss),
             ),
+            SizedBox(height: isMobile ? 12 : 18),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
@@ -237,6 +294,7 @@ class _CashPositionCard extends StatelessWidget {
                     ),
               ),
             ),
+            SizedBox(height: isMobile ? 14 : 18),
             Row(
               children: [
                 Expanded(child: _MiniMoney(label: 'Cash', value: position.cashOnHand)),
@@ -300,19 +358,17 @@ class _PriorityCard extends StatelessWidget {
           ]
         : priorities;
     return SproutCard(
-      child: SizedBox(
-        height: 168,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 168),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SectionHeader(title: '3 things today'),
             const SizedBox(height: 8),
-            Expanded(
-              child: ListView.separated(
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: math.min(items.length, 3),
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
+            for (var index = 0; index < math.min(items.length, 3); index++) ...[
+              if (index > 0) const SizedBox(height: 9),
+              Builder(
+                builder: (context) {
                   final item = items[index];
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,7 +387,7 @@ class _PriorityCard extends StatelessWidget {
                             ),
                             Text(
                               item.detail,
-                              maxLines: 1,
+                              maxLines: ResponsiveBreakpoints.of(context).isMobile ? 2 : 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.labelSmall,
                             ),
@@ -342,7 +398,7 @@ class _PriorityCard extends StatelessWidget {
                   );
                 },
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -533,7 +589,7 @@ class _MetricTile extends StatelessWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -563,7 +619,7 @@ class _MetricTile extends StatelessWidget {
                       maxLines: 1,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w900,
-                            fontSize: 20,
+                            fontSize: ResponsiveBreakpoints.of(context).isMobile ? 18 : 20,
                             color: scheme.onSurface,
                           ),
                     ),
