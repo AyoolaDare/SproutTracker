@@ -35,6 +35,10 @@ router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 settings = get_settings()
 
 
+def invoice_verify_url(invoice_id: str) -> str:
+    return f"{settings.verify_frontend_url}/{invoice_id}"
+
+
 async def ensure_customer_belongs_to_tenant(
     db: AsyncSession,
     customer_id: str,
@@ -227,7 +231,7 @@ async def get_invoice_pdf(
     db: AsyncSession = Depends(get_db),
 ):
     invoice = await load_invoice_or_404(db, invoice_id, user.tenant_id)
-    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-invoice/{invoice.id}"
+    verify_url = invoice_verify_url(invoice.id)
     pdf = render_invoice_pdf(invoice, verify_url)
     filename = f"{invoice.invoice_number}.pdf"
     return Response(
@@ -249,7 +253,7 @@ async def email_invoice(
     if not recipient:
         raise HTTPException(status_code=400, detail="Customer email is required")
 
-    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-invoice/{invoice.id}"
+    verify_url = invoice_verify_url(invoice.id)
     pdf = render_invoice_pdf(invoice, verify_url)
     send_invoice_email(recipient, invoice.invoice_number, pdf, req.message)
     await log_action(db, user.tenant_id, user.id, "EMAIL", "Invoice", invoice_id)

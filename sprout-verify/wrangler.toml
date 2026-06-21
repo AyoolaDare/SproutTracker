@@ -1,0 +1,22 @@
+name = "sprout-verify"
+main = "src/index.js"
+compatibility_date = "2026-06-21"
+pages_build_output_dir = "public"
+
+# D1 Database binding for Pages Functions and standalone Worker deploys.
+[[d1_databases]]
+binding = "DB"
+database_name = "sprout-verify"
+database_id = "YOUR_D1_DATABASE_ID_HERE"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "sprout-verify-staging"
+database_id = "YOUR_STAGING_D1_DATABASE_ID_HERE"
+
+# Rate limiting (Cloudflare native)
+[env.production.triggers]
+# Rate limit: 100 requests per IP per minute (via Cloudflare dashboard or API Shield)
+
+# CORS headers set in worker/functions code.
+# No secrets or auth tokens are exposed to visitors.

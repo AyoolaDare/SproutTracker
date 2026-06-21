@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:3000"
+    VERIFY_FRONTEND_URL: str = ""
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:4174"
     TRUSTED_HOSTS: str = "localhost,127.0.0.1"
 
@@ -82,6 +83,10 @@ class Settings(BaseSettings):
         return [v.strip() for v in values if v.strip()]
 
     @property
+    def verify_frontend_url(self) -> str:
+        return (self.VERIFY_FRONTEND_URL or self.FRONTEND_URL).rstrip("/")
+
+    @property
     def sync_database_url(self) -> str:
         default_sync = "postgresql://sprout:sprout@localhost:5432/sprout"
         if self.DATABASE_URL_SYNC != default_sync:
@@ -149,6 +154,11 @@ class Settings(BaseSettings):
             raise ValueError("FRONTEND_URL must be set to the deployed frontend URL.")
         if "localhost" in self.FRONTEND_URL or "127.0.0.1" in self.FRONTEND_URL:
             raise ValueError("FRONTEND_URL cannot be localhost in production.")
+        if self.VERIFY_FRONTEND_URL:
+            if "REPLACE_" in self.VERIFY_FRONTEND_URL or "your-" in self.VERIFY_FRONTEND_URL:
+                raise ValueError("VERIFY_FRONTEND_URL contains a placeholder value.")
+            if "localhost" in self.VERIFY_FRONTEND_URL or "127.0.0.1" in self.VERIFY_FRONTEND_URL:
+                raise ValueError("VERIFY_FRONTEND_URL cannot be localhost in production.")
         if "*" in self.cors_origins_list:
             raise ValueError("CORS_ORIGINS cannot include '*' when credentials are enabled.")
         if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins_list):
