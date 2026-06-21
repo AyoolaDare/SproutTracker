@@ -14,6 +14,11 @@ class DashboardMetrics {
     required this.lowStockCount,
     required this.revenueLastMonth,
     required this.expensesLastMonth,
+    required this.cashPosition,
+    required this.moneyOwed,
+    required this.businessHealthScore,
+    required this.businessHealthSummary,
+    required this.todaysPriorities,
     required this.monthlyCashFlow,
     required this.recentInvoices,
     required this.recentExpenses,
@@ -27,6 +32,11 @@ class DashboardMetrics {
   final int    lowStockCount;
   final double revenueLastMonth;
   final double expensesLastMonth;
+  final CashPositionSummary cashPosition;
+  final MoneyOwedSummary moneyOwed;
+  final int businessHealthScore;
+  final String businessHealthSummary;
+  final List<DashboardPriority> todaysPriorities;
   final List<MonthlyCashFlowPoint> monthlyCashFlow;
   final List<RecentInvoice>        recentInvoices;
   final List<RecentExpense>        recentExpenses;
@@ -55,6 +65,9 @@ class DashboardMetrics {
     final expenses = (data['recent_expenses'] as List? ?? [])
         .map((e) => RecentExpense.fromJson(e as Map<String, dynamic>))
         .toList();
+    final priorities = (data['todays_priorities'] as List? ?? [])
+        .map((e) => DashboardPriority.fromJson(e as Map<String, dynamic>))
+        .toList();
     final lowStockAlerts = (data['low_stock_alerts'] as List? ?? []);
     return DashboardMetrics(
       revenueThisMonth:  _d(data['revenue_this_month']),
@@ -65,6 +78,15 @@ class DashboardMetrics {
       lowStockCount:     (data['low_stock_count'] as num? ?? lowStockAlerts.length).toInt(),
       revenueLastMonth:  _d(data['revenue_last_month']),
       expensesLastMonth: _d(data['expenses_last_month']),
+      cashPosition: CashPositionSummary.fromJson(
+        (data['cash_position'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
+      moneyOwed: MoneyOwedSummary.fromJson(
+        (data['money_owed'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
+      businessHealthScore: (data['business_health_score'] as num? ?? 0).toInt(),
+      businessHealthSummary: data['business_health_summary'] as String? ?? 'Set up',
+      todaysPriorities: priorities,
       monthlyCashFlow:   cashFlow,
       recentInvoices:    invoices,
       recentExpenses:    expenses,
@@ -123,6 +145,40 @@ class DashboardMetrics {
       lowStockCount:      state.inventory.where((i) => i.quantity <= i.reorderLevel).length,
       revenueLastMonth:   revLastMonth,
       expensesLastMonth:  expLastMonth,
+      cashPosition: const CashPositionSummary(
+        cashOnHand: 85000,
+        bankBalance: 420000,
+        total: 505000,
+      ),
+      moneyOwed: MoneyOwedSummary(
+        total: state.invoices.fold(0, (s, i) => s + i.amountDue.toDouble()),
+        count: state.invoices.where((i) => i.amountDue > 0).length,
+        aging: const {},
+        topDebtors: const [],
+      ),
+      businessHealthScore: 74,
+      businessHealthSummary: 'Watch closely',
+      todaysPriorities: [
+        const DashboardPriority(
+          type: 'receivables',
+          title: 'Follow up unpaid invoices',
+          detail: 'Collect money owed before creating new credit sales',
+          severity: 'medium',
+        ),
+        if (state.inventory.any((i) => i.quantity <= i.reorderLevel))
+          const DashboardPriority(
+            type: 'inventory',
+            title: 'Restock low inventory',
+            detail: 'Some products are at or below reorder level',
+            severity: 'medium',
+          ),
+        const DashboardPriority(
+          type: 'cash',
+          title: 'Update cash position',
+          detail: 'Confirm today cash and bank balance',
+          severity: 'low',
+        ),
+      ].take(3).toList(),
       monthlyCashFlow:    cashFlow,
       recentInvoices: state.invoices.take(5).map(
         (i) => RecentInvoice(
@@ -148,6 +204,95 @@ class DashboardMetrics {
   static double _d(dynamic v) => (v as num? ?? 0).toDouble();
   static String _monthAbbr(int m) =>
       const ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1];
+}
+
+class CashPositionSummary {
+  const CashPositionSummary({
+    required this.cashOnHand,
+    required this.bankBalance,
+    required this.total,
+    this.recordedAt,
+  });
+
+  final double cashOnHand;
+  final double bankBalance;
+  final double total;
+  final DateTime? recordedAt;
+
+  factory CashPositionSummary.fromJson(Map<String, dynamic> j) {
+    final recorded = j['recorded_at'] as String?;
+    return CashPositionSummary(
+      cashOnHand: DashboardMetrics._d(j['cash_on_hand']),
+      bankBalance: DashboardMetrics._d(j['bank_balance']),
+      total: DashboardMetrics._d(j['total']),
+      recordedAt: recorded == null ? null : DateTime.tryParse(recorded),
+    );
+  }
+}
+
+class MoneyOwedSummary {
+  const MoneyOwedSummary({
+    required this.total,
+    required this.count,
+    required this.aging,
+    required this.topDebtors,
+  });
+
+  final double total;
+  final int count;
+  final Map<String, double> aging;
+  final List<TopDebtor> topDebtors;
+
+  factory MoneyOwedSummary.fromJson(Map<String, dynamic> j) {
+    final agingRaw = (j['aging'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return MoneyOwedSummary(
+      total: DashboardMetrics._d(j['total']),
+      count: (j['count'] as num? ?? 0).toInt(),
+      aging: agingRaw.map((key, value) => MapEntry(key, DashboardMetrics._d(value))),
+      topDebtors: (j['top_debtors'] as List? ?? [])
+          .map((e) => TopDebtor.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(),
+    );
+  }
+}
+
+class TopDebtor {
+  const TopDebtor({
+    required this.customerName,
+    required this.amount,
+    required this.oldestDaysOverdue,
+  });
+
+  final String customerName;
+  final double amount;
+  final int oldestDaysOverdue;
+
+  factory TopDebtor.fromJson(Map<String, dynamic> j) => TopDebtor(
+        customerName: j['customer_name'] as String? ?? 'Customer',
+        amount: DashboardMetrics._d(j['amount']),
+        oldestDaysOverdue: (j['oldest_days_overdue'] as num? ?? 0).toInt(),
+      );
+}
+
+class DashboardPriority {
+  const DashboardPriority({
+    required this.type,
+    required this.title,
+    required this.detail,
+    required this.severity,
+  });
+
+  final String type;
+  final String title;
+  final String detail;
+  final String severity;
+
+  factory DashboardPriority.fromJson(Map<String, dynamic> j) => DashboardPriority(
+        type: j['type'] as String? ?? 'task',
+        title: j['title'] as String? ?? 'Review business activity',
+        detail: j['detail'] as String? ?? '',
+        severity: j['severity'] as String? ?? 'low',
+      );
 }
 
 class MonthlyCashFlowPoint {

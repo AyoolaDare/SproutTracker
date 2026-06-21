@@ -67,6 +67,23 @@ class DashboardScreen extends ConsumerWidget {
                 .toList();
             return Column(
               children: [
+                _TwoColumnLayout(
+                  threshold: 980,
+                  leftFlex: 7,
+                  rightFlex: 5,
+                  left: _TwoColumnLayout(
+                    threshold: 640,
+                    left: _BusinessHealthCard(
+                      score: m.businessHealthScore,
+                      summary: m.businessHealthSummary,
+                    ),
+                    right: _CashPositionCard(position: m.cashPosition),
+                  ),
+                  right: _PriorityCard(priorities: m.todaysPriorities),
+                ),
+                const SizedBox(height: 14),
+                _MoneyOwedCard(summary: m.moneyOwed),
+                const SizedBox(height: 14),
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -106,6 +123,346 @@ class DashboardScreen extends ConsumerWidget {
 }
 
 // ── Two-column adaptive layout ─────────────────────────────────────────────────
+
+class _BusinessHealthCard extends StatelessWidget {
+  const _BusinessHealthCard({
+    required this.score,
+    required this.summary,
+  });
+
+  final int score;
+  final String summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = score >= 80
+        ? AppTheme.moss
+        : (score >= 60 ? AppTheme.ochre : AppTheme.terracotta);
+
+    return SproutCard(
+      child: SizedBox(
+        height: 168,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 96,
+              height: 96,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CircularProgressIndicator(
+                    value: score.clamp(0, 100) / 100,
+                    strokeWidth: 9,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    color: color,
+                  ),
+                  Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$score',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: scheme.onSurface,
+                            ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Business health',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    summary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.25,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  StatusPill(score >= 80 ? 'Strong' : (score >= 60 ? 'Watch' : 'Action needed')),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CashPositionCard extends StatelessWidget {
+  const _CashPositionCard({required this.position});
+  final CashPositionSummary position;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SproutCard(
+      child: SizedBox(
+        height: 168,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            SectionHeader(
+              title: 'Cash position',
+              trailing: Icon(Icons.account_balance_wallet_rounded, color: AppTheme.moss),
+            ),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                compactMoney(position.total),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: scheme.onSurface,
+                    ),
+              ),
+            ),
+            Row(
+              children: [
+                Expanded(child: _MiniMoney(label: 'Cash', value: position.cashOnHand)),
+                const SizedBox(width: 10),
+                Expanded(child: _MiniMoney(label: 'Bank', value: position.bankBalance)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniMoney extends StatelessWidget {
+  const _MiniMoney({required this.label, required this.value});
+  final String label;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              compactMoney(value),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriorityCard extends StatelessWidget {
+  const _PriorityCard({required this.priorities});
+  final List<DashboardPriority> priorities;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = priorities.isEmpty
+        ? const [
+            DashboardPriority(
+              type: 'setup',
+              title: 'Create your first activity',
+              detail: 'Add an invoice, product, or expense to unlock guidance',
+              severity: 'low',
+            ),
+          ]
+        : priorities;
+    return SproutCard(
+      child: SizedBox(
+        height: 168,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SectionHeader(title: '3 things today'),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.separated(
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: math.min(items.length, 3),
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(_priorityIcon(item.type), size: 18, color: _priorityColor(item.severity)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            Text(
+                              item.detail,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static IconData _priorityIcon(String type) => switch (type) {
+        'receivables' => Icons.call_rounded,
+        'inventory' => Icons.inventory_2_rounded,
+        'budget' => Icons.receipt_long_rounded,
+        'cash' => Icons.account_balance_wallet_rounded,
+        _ => Icons.check_circle_rounded,
+      };
+
+  static Color _priorityColor(String severity) => switch (severity) {
+        'high' => AppTheme.terracotta,
+        'medium' => AppTheme.ochre,
+        _ => AppTheme.moss,
+      };
+}
+
+class _MoneyOwedCard extends StatelessWidget {
+  const _MoneyOwedCard({required this.summary});
+  final MoneyOwedSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final buckets = [
+      ('Current', summary.aging['current'] ?? 0),
+      ('1-30', summary.aging['1_30'] ?? 0),
+      ('31-60', summary.aging['31_60'] ?? 0),
+      ('61-90', summary.aging['61_90'] ?? 0),
+      ('90+', summary.aging['90_plus'] ?? 0),
+    ];
+    return SproutCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: 'Money owed',
+            trailing: Text(
+              '${summary.count} open',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              compactMoney(summary.total),
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+            ),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, box) {
+              final children = buckets
+                  .map((b) => _AgingBucket(label: b.$1, value: b.$2))
+                  .toList();
+              if (box.maxWidth < 620) {
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: children,
+                );
+              }
+              return Row(
+                children: children
+                    .map((w) => Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: w,
+                          ),
+                        ),)
+                    .toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AgingBucket extends StatelessWidget {
+  const _AgingBucket({required this.label, required this.value});
+  final String label;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 96),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                compactMoney(value),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _TwoColumnLayout extends StatelessWidget {
   const _TwoColumnLayout({
@@ -783,4 +1140,3 @@ class _CashFlowPoint {
   final double income;    // in millions
   final double expenses;  // in millions
 }
-

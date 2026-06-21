@@ -15,6 +15,7 @@ class ApiProduct {
     required this.currentStock,
     required this.reorderLevel,
     required this.averageCost,
+    required this.marginPercent,
     this.trackInventory = true,
   });
 
@@ -27,6 +28,7 @@ class ApiProduct {
   final int     currentStock;
   final int     reorderLevel;
   final double  averageCost;
+  final double  marginPercent;
   final bool    trackInventory;
 
   bool get isLowStock => currentStock <= reorderLevel;
@@ -42,20 +44,25 @@ class ApiProduct {
         currentStock:   (j['current_stock'] as num? ?? 0).toInt(),
         reorderLevel:   (j['reorder_level'] as num? ?? 0).toInt(),
         averageCost:    (j['average_cost'] as num? ?? 0).toDouble(),
+        marginPercent:  (j['margin_percent'] as num? ?? 0).toDouble(),
         trackInventory: j['track_inventory'] as bool? ?? true,
       );
 
-  factory ApiProduct.fromLocal(InventoryItem i) => ApiProduct(
-        id:           i.id,
-        name:         i.name,
-        sku:          i.sku,
-        category:     i.category,
-        supplier:     i.supplier,
-        sellingPrice: i.unitCost.toDouble(),
-        currentStock: i.quantity,
-        reorderLevel: i.reorderLevel,
-        averageCost:  i.unitCost.toDouble(),
-      );
+  factory ApiProduct.fromLocal(InventoryItem i) {
+    final cost = i.unitCost.toDouble();
+    return ApiProduct(
+      id:            i.id,
+      name:          i.name,
+      sku:           i.sku,
+      category:      i.category,
+      supplier:      i.supplier,
+      sellingPrice:  cost,
+      currentStock:  i.quantity,
+      reorderLevel:  i.reorderLevel,
+      averageCost:   cost,
+      marginPercent: 0,
+    );
+  }
 }
 
 // ── Notifier ───────────────────────────────────────────────────────────────────

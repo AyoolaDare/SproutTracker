@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timezone
 from calendar import monthrange
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,18 +7,92 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User
 from app.models.invoice import Invoice, InvoiceItem, InvoiceStatus, Payment
-from app.models.expense import Expense
+from app.models.expense import Expense, ExpenseBudget
 from app.models.customer import Customer
 from app.models.product import Product
 from app.models.inventory import InventoryBatch
 from app.models.tax import TaxSettings
+from app.models.cash import CashPosition
 from app.middleware.auth import get_current_user
+from app.schemas.dashboard import CashPositionCreate, CashPositionResponse
 from app.services.tax import calculate_cit
 from app.core.redis import cache_get_json, cache_set_json, redis_key
 from app.config import get_settings
+from app.services.audit import log_action
+from app.services.cache import invalidate_tenant_dashboard
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 settings = get_settings()
+
+
+def _score_part(value: float, max_value: float) -> float:
+    if max_value <= 0:
+        return 100
+    return max(0, min(100, value / max_value * 100))
+
+
+@router.get("/cash-position")
+async def get_cash_position(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    position = await _latest_cash_position(db, user.tenant_id)
+    return {"success": True, "data": position}
+
+
+@router.post("/cash-position", status_code=201)
+async def save_cash_position(
+    req: CashPositionCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    position = CashPosition(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        cash_on_hand=req.cash_on_hand,
+        bank_balance=req.bank_balance,
+        notes=req.notes,
+        recorded_at=datetime.now(timezone.utc),
+    )
+    db.add(position)
+    await db.flush()
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "CREATE",
+        "CashPosition",
+        position.id,
+        new_values=req.model_dump(),
+    )
+    await db.commit()
+    await invalidate_tenant_dashboard(user.tenant_id)
+    return {"success": True, "data": _cash_position_payload(position)}
+
+
+async def _latest_cash_position(db: AsyncSession, tenant_id: str) -> dict:
+    result = await db.execute(
+        select(CashPosition)
+        .where(CashPosition.tenant_id == tenant_id)
+        .order_by(CashPosition.recorded_at.desc())
+        .limit(1)
+    )
+    return _cash_position_payload(result.scalar_one_or_none())
+
+
+def _cash_position_payload(position: CashPosition | None) -> dict:
+    if position is None:
+        return CashPositionResponse().model_dump(mode="json")
+    cash = float(position.cash_on_hand or 0)
+    bank = float(position.bank_balance or 0)
+    return CashPositionResponse(
+        id=position.id,
+        cash_on_hand=round(cash, 2),
+        bank_balance=round(bank, 2),
+        total=round(cash + bank, 2),
+        notes=position.notes,
+        recorded_at=position.recorded_at,
+    ).model_dump(mode="json")
 
 
 @router.get("/metrics")
@@ -113,6 +187,41 @@ async def get_metrics(
     outstanding_amount = float(row[0])
     outstanding_count = row[1]
 
+    receivables_result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.customer))
+        .where(
+            Invoice.tenant_id == tid,
+            Invoice.status.notin_([InvoiceStatus.DRAFT, InvoiceStatus.VOID]),
+            Invoice.outstanding_amount > 0,
+        )
+    )
+    receivables = receivables_result.scalars().unique().all()
+    aging = {"current": 0.0, "1_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0}
+    debtor_totals: dict[str, dict] = {}
+    for invoice in receivables:
+        amount = float(invoice.outstanding_amount or 0)
+        days_overdue = (today - invoice.due_date).days if invoice.due_date else 0
+        if days_overdue <= 0:
+            bucket = "current"
+        elif days_overdue <= 30:
+            bucket = "1_30"
+        elif days_overdue <= 60:
+            bucket = "31_60"
+        elif days_overdue <= 90:
+            bucket = "61_90"
+        else:
+            bucket = "90_plus"
+        aging[bucket] += amount
+        customer_name = invoice.customer.name if invoice.customer else "Unknown customer"
+        existing = debtor_totals.setdefault(customer_name, {"customer_name": customer_name, "amount": 0.0, "oldest_days_overdue": 0})
+        existing["amount"] += amount
+        existing["oldest_days_overdue"] = max(existing["oldest_days_overdue"], max(days_overdue, 0))
+    aging = {key: round(value, 2) for key, value in aging.items()}
+    top_debtors = sorted(debtor_totals.values(), key=lambda row: row["amount"], reverse=True)[:5]
+    for debtor in top_debtors:
+        debtor["amount"] = round(debtor["amount"], 2)
+
     # --- Inventory value ---
     batch_result = await db.execute(
         select(
@@ -173,6 +282,28 @@ async def get_metrics(
         {"category": row[0], "amount": float(row[1])}
         for row in cat_result.all()
     ]
+
+    budget_result = await db.execute(
+        select(ExpenseBudget).where(
+            ExpenseBudget.tenant_id == tid,
+            ExpenseBudget.month == month_start,
+            ExpenseBudget.is_active == True,
+        )
+    )
+    actual_by_category = {row["category"]: row["amount"] for row in expense_breakdown}
+    budget_watch = []
+    for budget in budget_result.scalars().all():
+        actual = float(actual_by_category.get(budget.category, 0))
+        amount = float(budget.amount or 0)
+        usage = actual / amount * 100 if amount > 0 else 0
+        if usage >= float(budget.alert_threshold_percent or 80):
+            budget_watch.append({
+                "category": budget.category,
+                "budget": round(amount, 2),
+                "actual": round(actual, 2),
+                "usage_percent": round(usage, 1),
+                "status": "OVER_BUDGET" if usage >= 100 else "WATCH",
+            })
 
     # --- Top selling products (this month) ---
     top_result = await db.execute(
@@ -300,6 +431,62 @@ async def get_metrics(
                 "reorder_level": p.reorder_level,
             })
 
+    cash_position = await _latest_cash_position(db, tid)
+    cash_total = float(cash_position.get("total") or 0)
+    runway_score = _score_part(cash_total, expenses_this_month if expenses_this_month > 0 else 1)
+    profit_score = 100 if net_profit > 0 else (55 if revenue_this_month > 0 else 30)
+    receivables_score = 100 if outstanding_amount == 0 else max(0, 100 - ((aging["31_60"] + aging["61_90"] + aging["90_plus"]) / outstanding_amount * 100))
+    inventory_score = max(0, 100 - min(len(low_stock_alerts) * 15, 100))
+    budget_score = 100 if not budget_watch else max(0, 100 - min(len(budget_watch) * 25, 100))
+    health_score = round(
+        runway_score * 0.30
+        + profit_score * 0.25
+        + receivables_score * 0.20
+        + inventory_score * 0.15
+        + budget_score * 0.10
+    )
+    if health_score >= 80:
+        health_summary = "Healthy"
+    elif health_score >= 60:
+        health_summary = "Watch closely"
+    else:
+        health_summary = "Needs attention"
+
+    priorities = []
+    overdue_debtors = [d for d in top_debtors if d["oldest_days_overdue"] > 0]
+    if overdue_debtors:
+        d = overdue_debtors[0]
+        priorities.append({
+            "type": "receivables",
+            "title": f"Follow up {d['customer_name']}",
+            "detail": f"{d['oldest_days_overdue']} days overdue, {round(d['amount'], 2)} outstanding",
+            "severity": "high" if d["oldest_days_overdue"] > 60 else "medium",
+        })
+    if low_stock_alerts:
+        p = low_stock_alerts[0]
+        priorities.append({
+            "type": "inventory",
+            "title": f"Reorder {p['product_name']}",
+            "detail": f"{p['current_stock']} left, reorder level is {p['reorder_level']}",
+            "severity": "medium",
+        })
+    if budget_watch:
+        b = sorted(budget_watch, key=lambda row: row["usage_percent"], reverse=True)[0]
+        priorities.append({
+            "type": "budget",
+            "title": f"Review {b['category']} spending",
+            "detail": f"{b['usage_percent']}% of this month budget used",
+            "severity": "high" if b["status"] == "OVER_BUDGET" else "medium",
+        })
+    if len(priorities) < 3 and not cash_position.get("id"):
+        priorities.append({
+            "type": "cash",
+            "title": "Add today's cash position",
+            "detail": "Enter cash and bank balance so runway is accurate",
+            "severity": "low",
+        })
+    priorities = priorities[:3]
+
     payload = {
         "success": True,
         "data": {
@@ -313,6 +500,19 @@ async def get_metrics(
             "outstanding_invoices": round(outstanding_amount, 2),
             "outstanding_balance": round(outstanding_amount, 2),
             "outstanding_count": outstanding_count,
+            "money_owed": {
+                "total": round(outstanding_amount, 2),
+                "count": outstanding_count,
+                "aging": aging,
+                "top_debtors": top_debtors,
+            },
+            "money_owed_aging": aging,
+            "top_debtors": top_debtors,
+            "cash_position": cash_position,
+            "business_health_score": health_score,
+            "business_health_summary": health_summary,
+            "todays_priorities": priorities,
+            "budget_watch": budget_watch,
             "inventory_value": round(inventory_value, 2),
             "stock_value": round(inventory_value, 2),
             "low_stock_count": len(low_stock_alerts),
@@ -327,6 +527,7 @@ async def get_metrics(
             "recent_invoices": recent_invoices,
             "recent_expenses": recent_expenses,
             "low_stock_alerts": low_stock_alerts,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         },
     }
     await cache_set_json(cache_key, payload, settings.DASHBOARD_CACHE_SECONDS)

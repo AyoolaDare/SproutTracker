@@ -311,6 +311,7 @@ class _InventoryTile extends ConsumerWidget {
             children: [
               Expanded(child: _Stat(label: 'On hand', value: '${item.currentStock} units')),
               Expanded(child: _Stat(label: 'Value', value: compactMoney(item.stockValue))),
+              Expanded(child: _Stat(label: 'Margin', value: '${item.marginPercent.toStringAsFixed(1)}%')),
             ],
           ),
           const SizedBox(height: 12),

@@ -1,37 +1,84 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/features/invoices_provider.dart';
 import '../../core/api/features/settings_provider.dart';
-import '../../core/printing/print_service.dart';
 import '../../shared/formatters.dart';
+import 'invoice_pdf_service.dart';
 
-class InvoicePrintScreen extends ConsumerWidget {
+class InvoicePrintScreen extends ConsumerStatefulWidget {
   const InvoicePrintScreen({required this.invoiceId, super.key});
 
   final String invoiceId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InvoicePrintScreen> createState() => _InvoicePrintScreenState();
+}
+
+class _InvoicePrintScreenState extends ConsumerState<InvoicePrintScreen> {
+  late final Future<ApiInvoice?> _invoiceFuture;
+  bool _downloading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Stored once — ref.watch in build keeps the AutoDispose provider alive.
+    _invoiceFuture =
+        ref.read(invoicesProvider.notifier).getById(widget.invoiceId);
+  }
+
+  Future<void> _download(ApiInvoice invoice, ApiBusinessProfile profile) async {
+    setState(() => _downloading = true);
+    try {
+      final Uint8List bytes = await buildInvoicePdf(invoice, profile);
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${invoice.invoiceNumber}.pdf',
+      );
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Watch keeps the AutoDispose provider alive while this screen is mounted.
+    ref.watch(invoicesProvider);
     final profile = ref.watch(settingsProvider).valueOrNull ??
         const ApiBusinessProfile(businessName: 'Sprout Track');
-    final invoiceFuture = ref.watch(invoicesProvider.notifier).getById(invoiceId);
 
     return FutureBuilder<ApiInvoice?>(
-      future: invoiceFuture,
+      future: _invoiceFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         final invoice = snapshot.data;
         if (invoice == null || snapshot.hasError) {
           return Scaffold(
+            appBar: AppBar(title: const Text('Invoice')),
             body: Center(
-              child: Text(
-                snapshot.error == null
-                    ? 'Invoice not found'
-                    : 'Invoice not found: ${snapshot.error}',
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.receipt_long_outlined,
+                    size: 52,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    snapshot.hasError
+                        ? 'Could not load invoice'
+                        : 'Invoice not found',
+                  ),
+                ],
               ),
             ),
           );
@@ -40,16 +87,55 @@ class InvoicePrintScreen extends ConsumerWidget {
         final isReceipt = invoice.isPaid;
 
         return Scaffold(
-          backgroundColor: Colors.white,
+          backgroundColor: const Color(0xFFF0EBE1),
           appBar: AppBar(
-            title: Text(isReceipt ? 'Receipt preview' : 'Invoice preview'),
+            backgroundColor: AppTheme.ink,
+            foregroundColor: AppTheme.sand,
+            elevation: 0,
+            title: Text(
+              isReceipt
+                  ? 'Receipt • ${invoice.invoiceNumber}'
+                  : 'Invoice • ${invoice.invoiceNumber}',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            ),
             actions: [
-              FilledButton.icon(
-                onPressed: printCurrentPage,
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('Print'),
-              ),
-              const SizedBox(width: 12),
+              if (_downloading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 18),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppTheme.sand,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: FilledButton.icon(
+                    onPressed: () => _download(invoice, profile),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.moss,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    icon: const Icon(Icons.download_rounded, size: 17),
+                    label: const Text(
+                      'Download PDF',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
             ],
           ),
           body: SingleChildScrollView(
@@ -57,36 +143,43 @@ class InvoicePrintScreen extends ConsumerWidget {
             child: Center(
               child: Container(
                 width: 820,
-                padding: const EdgeInsets.all(42),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  border: Border.all(color: const Color(0xFFE7E0D2)),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: const Color(0xFFE0D8CC)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: .07),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                child: DefaultTextStyle(
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium!
-                      .copyWith(color: AppTheme.ink),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                clipBehavior: Clip.hardEdge,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Header band ─────────────────────────────────────
+                    Container(
+                      color: AppTheme.ink,
+                      padding: const EdgeInsets.fromLTRB(42, 26, 42, 26),
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 72,
-                            height: 72,
+                            width: 56,
+                            height: 56,
                             decoration: BoxDecoration(
                               color: AppTheme.moss,
-                              borderRadius: BorderRadius.circular(22),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                             child: const Icon(
                               Icons.eco_rounded,
                               color: AppTheme.sand,
-                              size: 36,
+                              size: 28,
                             ),
                           ),
-                          const SizedBox(width: 18),
+                          const SizedBox(width: 16),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -95,18 +188,40 @@ class InvoicePrintScreen extends ConsumerWidget {
                                   profile.businessName,
                                   style: Theme.of(context)
                                       .textTheme
-                                      .headlineSmall
+                                      .titleLarge
                                       ?.copyWith(
-                                        color: AppTheme.ink,
+                                        color: AppTheme.sand,
                                         fontWeight: FontWeight.w900,
                                       ),
                                 ),
                                 if ((profile.address ?? '').isNotEmpty)
-                                  Text(profile.address!),
-                                Text([
-                                  if ((profile.email ?? '').isNotEmpty) profile.email!,
-                                  if ((profile.phone ?? '').isNotEmpty) profile.phone!,
-                                ].join(' • '),),
+                                  Text(
+                                    profile.address!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: AppTheme.sand
+                                              .withValues(alpha: .65),
+                                        ),
+                                  ),
+                                if ((profile.phone ?? '').isNotEmpty ||
+                                    (profile.email ?? '').isNotEmpty)
+                                  Text(
+                                    [
+                                      if ((profile.phone ?? '').isNotEmpty)
+                                        profile.phone!,
+                                      if ((profile.email ?? '').isNotEmpty)
+                                        profile.email!,
+                                    ].join('  •  '),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: AppTheme.sand
+                                              .withValues(alpha: .55),
+                                        ),
+                                  ),
                               ],
                             ),
                           ),
@@ -119,130 +234,295 @@ class InvoicePrintScreen extends ConsumerWidget {
                                     .textTheme
                                     .headlineMedium
                                     ?.copyWith(
-                                      color: AppTheme.ink,
+                                      color: AppTheme.sand,
                                       fontWeight: FontWeight.w900,
+                                      letterSpacing: 3,
                                     ),
                               ),
-                              Text(invoice.displayStatus.toUpperCase()),
+                              const SizedBox(height: 2),
+                              Text(
+                                invoice.invoiceNumber,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: AppTheme.clay,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
                             ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 34),
-                      Row(
+                    ),
+
+                    // ── Status ribbon ─────────────────────────────────────
+                    Container(
+                      width: double.infinity,
+                      color: isReceipt
+                          ? const Color(0xFF2E7D32)
+                          : AppTheme.terracotta,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 42,
+                        vertical: 6,
+                      ),
+                      child: Text(
+                        isReceipt ? 'FULLY PAID' : 'PAYMENT PENDING',
+                        style:
+                            Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 2.5,
+                                ),
+                      ),
+                    ),
+
+                    // ── Body ─────────────────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(42, 28, 42, 36),
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: _PrintBlock(
-                              title: 'Billed To',
-                              lines: [invoice.customerName],
-                            ),
-                          ),
-                          Expanded(
-                            child: _PrintBlock(
-                              title: 'Document',
-                              alignEnd: true,
-                              lines: [
-                                invoice.invoiceNumber,
-                                'Issued ${shortDate(invoice.invoiceDate)}',
-                                if (!isReceipt) 'Due ${shortDate(invoice.dueDate)}',
-                                'Payment ${invoice.paymentStatus}',
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 30),
-                      Table(
-                        columnWidths: const {
-                          0: FlexColumnWidth(4),
-                          1: FlexColumnWidth(1),
-                          2: FlexColumnWidth(2),
-                          3: FlexColumnWidth(2),
-                        },
-                        border: TableBorder(
-                          horizontalInside: BorderSide(
-                            color: AppTheme.clay.withValues(alpha: .25),
-                          ),
-                          top: BorderSide(color: AppTheme.clay.withValues(alpha: .35)),
-                          bottom:
-                              BorderSide(color: AppTheme.clay.withValues(alpha: .35)),
-                        ),
-                        children: [
-                          const TableRow(
+                          // Bill To / Document meta
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _TableCell('Item', bold: true),
-                              _TableCell('Qty', bold: true, alignEnd: true),
-                              _TableCell('Price', bold: true, alignEnd: true),
-                              _TableCell('Total', bold: true, alignEnd: true),
+                              Expanded(
+                                child: _PrintBlock(
+                                  title: 'BILLED TO',
+                                  lines: [invoice.customerName],
+                                ),
+                              ),
+                              _PrintBlock(
+                                title: 'DOCUMENT',
+                                alignEnd: true,
+                                lines: [
+                                  invoice.invoiceNumber,
+                                  'Issued ${shortDate(invoice.invoiceDate)}',
+                                  if (!isReceipt)
+                                    'Due ${shortDate(invoice.dueDate)}',
+                                ],
+                              ),
                             ],
                           ),
-                          for (final item in invoice.lineItems)
-                            TableRow(
-                              children: [
-                                _TableCell(item.productName),
-                                _TableCell('${item.quantity}', alignEnd: true),
-                                _TableCell(money(item.unitPrice), alignEnd: true),
-                                _TableCell(money(item.lineTotal), alignEnd: true),
-                              ],
+
+                          const SizedBox(height: 28),
+
+                          // Items table
+                          Table(
+                            columnWidths: const {
+                              0: FlexColumnWidth(4),
+                              1: FlexColumnWidth(1),
+                              2: FlexColumnWidth(2),
+                              3: FlexColumnWidth(2),
+                            },
+                            border: TableBorder(
+                              top: BorderSide(
+                                color: AppTheme.moss.withValues(alpha: .35),
+                              ),
+                              bottom: BorderSide(
+                                color: AppTheme.moss.withValues(alpha: .35),
+                              ),
+                              horizontalInside: BorderSide(
+                                color: AppTheme.clay.withValues(alpha: .18),
+                              ),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 26),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: SizedBox(
-                          width: 280,
-                          child: Column(
                             children: [
-                              _TotalLine('Subtotal', invoice.subtotal),
-                              _TotalLine('VAT', invoice.vatAmount),
-                              _TotalLine('Total', invoice.totalAmount, bold: true),
-                              _TotalLine('Amount paid', invoice.amountPaid),
-                              if (!isReceipt)
-                                _TotalLine(
-                                  'Amount due',
-                                  invoice.amountDue,
-                                  bold: true,
+                              TableRow(
+                                decoration: BoxDecoration(
+                                  color: AppTheme.moss.withValues(alpha: .06),
+                                ),
+                                children: const [
+                                  _TableCell(
+                                    'ITEM',
+                                    bold: true,
+                                    small: true,
+                                    label: true,
+                                  ),
+                                  _TableCell(
+                                    'QTY',
+                                    bold: true,
+                                    small: true,
+                                    label: true,
+                                    alignEnd: true,
+                                  ),
+                                  _TableCell(
+                                    'UNIT PRICE',
+                                    bold: true,
+                                    small: true,
+                                    label: true,
+                                    alignEnd: true,
+                                  ),
+                                  _TableCell(
+                                    'TOTAL',
+                                    bold: true,
+                                    small: true,
+                                    label: true,
+                                    alignEnd: true,
+                                  ),
+                                ],
+                              ),
+                              for (final item in invoice.lineItems)
+                                TableRow(
+                                  children: [
+                                    _TableCell(item.productName),
+                                    _TableCell(
+                                      '${item.quantity}',
+                                      alignEnd: true,
+                                    ),
+                                    _TableCell(
+                                      money(item.unitPrice),
+                                      alignEnd: true,
+                                    ),
+                                    _TableCell(
+                                      money(item.lineTotal),
+                                      bold: true,
+                                      alignEnd: true,
+                                    ),
+                                  ],
                                 ),
                             ],
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 34),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Container(
-                            width: 96,
-                            height: 96,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              border: Border.all(color: AppTheme.moss),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              'QR\nVERIFY',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
-                                  ?.copyWith(color: AppTheme.moss),
+
+                          const SizedBox(height: 24),
+
+                          // Totals
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: SizedBox(
+                              width: 300,
+                              child: Column(
+                                children: [
+                                  if (invoice.vatAmount > 0) ...[
+                                    _TotalLine(
+                                      'Subtotal',
+                                      invoice.subtotal,
+                                    ),
+                                    _TotalLine(
+                                      'VAT (7.5%)',
+                                      invoice.vatAmount,
+                                    ),
+                                  ],
+                                  Divider(
+                                    color: AppTheme.clay.withValues(alpha: .3),
+                                  ),
+                                  _TotalLine(
+                                    'Total',
+                                    invoice.totalAmount,
+                                    bold: true,
+                                  ),
+                                  _TotalLine(
+                                    'Amount Paid',
+                                    invoice.amountPaid,
+                                    color: isReceipt
+                                        ? const Color(0xFF2E7D32)
+                                        : null,
+                                  ),
+                                  if (!isReceipt &&
+                                      invoice.amountDue > 0) ...[
+                                    Divider(
+                                      color:
+                                          AppTheme.clay.withValues(alpha: .3),
+                                    ),
+                                    _TotalLine(
+                                      'Balance Due',
+                                      invoice.amountDue,
+                                      bold: true,
+                                      color: AppTheme.terracotta,
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(child: Text('Verify at /verify-invoice/${invoice.id}')),
-                          Text(
-                            'Thank you for your business.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w900),
+
+                          const SizedBox(height: 32),
+
+                          // Footer
+                          Divider(color: AppTheme.clay.withValues(alpha: .25)),
+                          const SizedBox(height: 14),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if ((profile.bankName ?? '').isNotEmpty ||
+                                  (profile.accountNumber ?? '').isNotEmpty)
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'PAYMENT DETAILS',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color: AppTheme.moss,
+                                              letterSpacing: 1.5,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      if ((profile.bankName ?? '').isNotEmpty)
+                                        Text(
+                                          'Bank: ${profile.bankName!}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(color: AppTheme.ink),
+                                        ),
+                                      if ((profile.accountNumber ?? '')
+                                          .isNotEmpty)
+                                        Text(
+                                          'Account: ${profile.accountNumber!}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(color: AppTheme.ink),
+                                        ),
+                                      if ((profile.accountName ?? '')
+                                          .isNotEmpty)
+                                        Text(
+                                          'Name: ${profile.accountName!}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(color: AppTheme.ink),
+                                        ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                const Expanded(child: SizedBox()),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Thank you for your business.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: AppTheme.moss,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Powered by Sprout Track',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(color: AppTheme.clay),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -252,6 +532,8 @@ class InvoicePrintScreen extends ConsumerWidget {
     );
   }
 }
+
+// ── Sub-widgets ─────────────────────────────────────────────────────────────
 
 class _PrintBlock extends StatelessWidget {
   const _PrintBlock({
@@ -267,17 +549,26 @@ class _PrintBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment:
+          alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(color: AppTheme.moss),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppTheme.moss,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
+              ),
         ),
         const SizedBox(height: 6),
-        for (final line in lines.where((line) => line.trim().isNotEmpty))
+        for (final line in lines.where((l) => l.trim().isNotEmpty))
           Text(
             line,
             textAlign: alignEnd ? TextAlign.right : TextAlign.left,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppTheme.ink),
           ),
       ],
     );
@@ -285,42 +576,70 @@ class _PrintBlock extends StatelessWidget {
 }
 
 class _TableCell extends StatelessWidget {
-  const _TableCell(this.text, {this.bold = false, this.alignEnd = false});
+  const _TableCell(
+    this.text, {
+    this.bold = false,
+    this.small = false,
+    this.label = false,
+    this.alignEnd = false,
+  });
 
   final String text;
   final bool bold;
+  final bool small;
+  final bool label;
   final bool alignEnd;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 8),
       child: Text(
         text,
         textAlign: alignEnd ? TextAlign.right : TextAlign.left,
-        style: TextStyle(fontWeight: bold ? FontWeight.w900 : FontWeight.w500),
+        style: (small
+                ? Theme.of(context).textTheme.labelSmall
+                : Theme.of(context).textTheme.bodyMedium)
+            ?.copyWith(
+          color: label ? AppTheme.moss : AppTheme.ink,
+          fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+          letterSpacing: label ? 0.8 : null,
+        ),
       ),
     );
   }
 }
 
 class _TotalLine extends StatelessWidget {
-  const _TotalLine(this.label, this.amount, {this.bold = false});
+  const _TotalLine(this.label, this.amount, {this.bold = false, this.color});
 
   final String label;
   final num amount;
   final bool bold;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    final effective = color ?? AppTheme.ink;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
-          Expanded(child: Text(label)),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                color: effective,
+              ),
+            ),
+          ),
           Text(
             money(amount),
-            style: TextStyle(fontWeight: bold ? FontWeight.w900 : FontWeight.w600),
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+              color: effective,
+            ),
           ),
         ],
       ),

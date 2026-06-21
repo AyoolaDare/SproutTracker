@@ -23,6 +23,11 @@ def product_to_response(product: Product) -> dict:
     total_qty = sum(b.remaining_quantity for b in active_batches)
     total_cost = sum(b.remaining_quantity * float(b.unit_cost) for b in active_batches)
     avg_cost = total_cost / total_qty if total_qty > 0 else 0
+    selling_price = float(product.selling_price)
+    margin_percent = (
+        ((selling_price - avg_cost) / selling_price) * 100
+        if selling_price > 0 and avg_cost > 0 else 0
+    )
 
     return ProductResponse(
         id=product.id,
@@ -30,13 +35,14 @@ def product_to_response(product: Product) -> dict:
         sku=product.sku,
         description=product.description,
         category=product.category,
-        selling_price=float(product.selling_price),
+        selling_price=selling_price,
         track_inventory=product.track_inventory,
         reorder_level=product.reorder_level,
         vat_applicable=product.vat_applicable,
         is_active=product.is_active,
         current_stock=current_stock,
         average_cost=round(avg_cost, 2),
+        margin_percent=round(margin_percent, 1),
         created_at=product.created_at,
     )
 

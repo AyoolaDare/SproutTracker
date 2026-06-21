@@ -25,6 +25,8 @@ dependencies:
   google_sign_in_platform_interface: ^2.5.0
   google_sign_in_web: ^0.12.4+4
   fl_chart: ^0.69.2
+  pdf: ^3.11.1
+  printing: ^5.13.3
 
 dev_dependencies:
   flutter_test:

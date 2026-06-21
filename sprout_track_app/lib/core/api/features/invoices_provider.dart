@@ -201,6 +201,12 @@ class InvoicesNotifier extends AutoDisposeAsyncNotifier<List<ApiInvoice>> {
   }
 
   Future<ApiInvoice?> getById(String id) async {
+    final isDemo = ref.read(authProvider).isDemo;
+    if (isDemo) {
+      // Use cached state if loaded, otherwise await first build
+      final all = state.valueOrNull ?? await future;
+      return all.where((inv) => inv.id == id).firstOrNull;
+    }
     final res = await ref.read(apiClientProvider).get('/api/invoices/$id');
     final body = res.data as Map<String, dynamic>;
     return ApiInvoice.fromJson((body['data'] ?? body) as Map<String, dynamic>);

@@ -38,6 +38,7 @@ class ProductResponse(BaseModel):
     is_active: bool
     current_stock: int = 0
     average_cost: float = 0
+    margin_percent: float = 0
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

@@ -45,3 +45,25 @@ class ExpenseResponse(BaseModel):
     created_at: DateTime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ExpenseBudgetUpsert(BaseModel):
+    category: str = Field(min_length=2, max_length=100)
+    month: Date
+    amount: float = Field(ge=0)
+    alert_threshold_percent: float = Field(default=80, ge=1, le=100)
+    is_active: bool = True
+
+
+class ExpenseBudgetResponse(BaseModel):
+    id: str
+    category: str
+    month: Date
+    amount: float
+    actual_amount: float = 0
+    usage_percent: float = 0
+    alert_threshold_percent: float = 80
+    is_active: bool = True
+    status: str = "ON_TRACK"
+
+    model_config = {"from_attributes": True}
