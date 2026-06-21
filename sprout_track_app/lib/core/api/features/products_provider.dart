@@ -222,7 +222,28 @@ class StockMovementsNotifier
 
   Future<List<ApiStockMovement>> _load() async {
     final isDemo = ref.watch(authProvider).isDemo;
-    if (isDemo) return [];
+    if (isDemo) {
+      final history = ref.watch(sproutStoreProvider).inventoryHistory;
+      return history
+          .map(
+            (e) => ApiStockMovement(
+              id: e.id,
+              productId: e.itemId ?? '',
+              productName: e.itemName,
+              movementType: switch (e.type) {
+                'Sale' => 'SALE',
+                'Adjustment' || 'Goods Return' || 'Deleted' => 'ADJUST',
+                _ => 'RECEIVE',
+              },
+              quantity: e.change,
+              unitValue: 0,
+              totalValue: (e.amount ?? 0).toDouble(),
+              notes: e.details,
+              createdAt: e.date,
+            ),
+          )
+          .toList();
+    }
     final res = await ref.watch(apiClientProvider).get(
       '/api/inventory/movements',
       query: {'limit': 20},

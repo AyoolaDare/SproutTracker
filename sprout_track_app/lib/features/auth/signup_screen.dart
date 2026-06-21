@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/api/api_client.dart';
+import '../../core/auth/auth_provider.dart';
 import 'widgets/google_auth_button.dart';
 
 const _businessTypes = [
@@ -473,9 +474,36 @@ class _SignupFormState extends ConsumerState<_SignupForm> {
                   : _businessName.text.trim(),
               businessType: _businessType,
             ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(child: Divider(color: scheme.outlineVariant)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'or',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+                Expanded(child: Divider(color: scheme.outlineVariant)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: _loading
+                  ? null
+                  : () => ref.read(authProvider.notifier).loginDemo(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.moss,
+                side: BorderSide(color: AppTheme.moss.withValues(alpha: .45)),
+              ),
+              icon: const Icon(Icons.play_circle_outline_rounded, size: 18),
+              label: const Text('Explore demo — no account needed'),
+            ),
             const SizedBox(height: 16),
             Row(
-
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(

@@ -399,6 +399,34 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
               const GoogleAuthButton(label: 'Continue with Google'),
               const SizedBox(height: 20),
               Row(
+                children: [
+                  Expanded(child: Divider(color: scheme.outlineVariant)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      'or',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                  Expanded(child: Divider(color: scheme.outlineVariant)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: isLoading
+                    ? null
+                    : () => ref.read(authProvider.notifier).loginDemo(),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.moss,
+                  side: BorderSide(color: AppTheme.moss.withValues(alpha: .45)),
+                ),
+                icon: const Icon(Icons.play_circle_outline_rounded, size: 18),
+                label: const Text('Explore demo — no account needed'),
+              ),
+              const SizedBox(height: 20),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
